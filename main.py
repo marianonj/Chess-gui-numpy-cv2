@@ -46,20 +46,20 @@ class Img:
         self.draw_board((y_empty_square_idxs[0, 2:6].flatten(), y_empty_square_idxs[1, 2:6].flatten()), position_array)
 
     def draw_board(self, position_array_draw_idxs_y_x, position_array, pre_move=False):
-        draw_idxs = self.return_draw_indicies_from_board_indicies(position_array_draw_idxs_y_x[0], position_array_draw_idxs_y_x[1])
-        pieces = np.argwhere(position_array[0, position_array_draw_idxs_y_x[0], position_array_draw_idxs_y_x[1]] != 0).flatten()
-        empty_spaces = np.argwhere(position_array[0, position_array_draw_idxs_y_x[0], position_array_draw_idxs_y_x[1]] == 0).flatten()
+        draw_idxs = self.return_draw_indicies_from_board_indicies(position_array_draw_idxs_y_x)
+        pieces = np.argwhere(position_array[0, position_array_draw_idxs_y_x[:, 0], position_array_draw_idxs_y_x[:, 1]] != 0).flatten()
+        empty_spaces = np.argwhere(position_array[0, position_array_draw_idxs_y_x[:, 0], position_array_draw_idxs_y_x[:, 1]] == 0).flatten()
         if pre_move:
             final_color_i = 1
         else:
             final_color_i = 0
         if pieces.shape[0] != 0:
-            piece_draw_is = np.vstack((position_array[0:3, position_array_draw_idxs_y_x[0][pieces], position_array_draw_idxs_y_x[1][pieces]], np.full(pieces.shape[0], final_color_i)))
+            piece_draw_is = np.vstack((position_array[0:3, position_array_draw_idxs_y_x[:, 0][pieces], position_array_draw_idxs_y_x[:, 1][pieces]], np.full(pieces.shape[0], final_color_i)))
             for draw_i, img_i in zip(pieces, piece_draw_is.T):
                 self.img[draw_idxs[draw_i, 0]: draw_idxs[draw_i, 1], draw_idxs[draw_i, 2]: draw_idxs[draw_i, 3]] = self.board_pieces_img_arrays[img_i[0] - 1, img_i[1], img_i[2], img_i[3]]
 
         if empty_spaces.shape[0] != 0:
-            space_draw_is = position_array[2, position_array_draw_idxs_y_x[0][empty_spaces], position_array_draw_idxs_y_x[1][empty_spaces]]
+            space_draw_is = position_array[2, position_array_draw_idxs_y_x[:, 0][empty_spaces], position_array_draw_idxs_y_x[:, 1][empty_spaces]]
             for draw_i, img_i in zip(empty_spaces, space_draw_is):
                 self.img[draw_idxs[draw_i, 0]: draw_idxs[draw_i, 1], draw_idxs[draw_i, 2]: draw_idxs[draw_i, 3]] = self.grid_square_templates[img_i, final_color_i]
 
@@ -137,11 +137,11 @@ class Img:
         else:
             return False
 
-    def return_draw_indicies_from_board_indicies(self, board_indicies_y, board_indicies_x):
-        return np.column_stack((board_indicies_y * Img.grid_square_size_yx[0],
-                                (board_indicies_y + 1) * Img.grid_square_size_yx[0],
-                                board_indicies_x * Img.grid_square_size_yx[1] + self.x_label_offset,
-                                (board_indicies_x + 1) * Img.grid_square_size_yx[1] + self.x_label_offset))
+    def return_draw_indicies_from_board_indicies(self, board_indicies_y_x):
+        return np.column_stack((board_indicies_y_x[:, 0] * Img.grid_square_size_yx[0],
+                                (board_indicies_y_x[:, 0] + 1) * Img.grid_square_size_yx[0],
+                                board_indicies_y_x[:, 1] * Img.grid_square_size_yx[1] + self.x_label_offset,
+                                (board_indicies_y_x[:, 1] + 1) * Img.grid_square_size_yx[1] + self.x_label_offset))
 
     def return_y_x_idx(self, mouse_x, mouse_y):
         return int((mouse_y / self.grid_square_size_yx[1])), \
@@ -221,21 +221,28 @@ def setup():
 
 
 def main():
-    def return_potential_moves(calculation_method):
-        if type == 'p':
-            pass
-        elif type == 'k':
-            pass
+    def set_starting_board_state(fisher=False):
+        nonlocal rook_king_rook_has_moved, en_passant_tracker
+        if not fisher:
+            non_pawn_row_values = np.array([Pieces.rook.value, Pieces.knight.value, Pieces.bishop.value, Pieces.queen.value, Pieces.king.value, Pieces.bishop.value, Pieces.knight.value, Pieces.rook.value]) + 1
         else:
-
             pass
 
-        pass
+        for piece_color_i, pawn_row_i, non_pawn_row_i, in zip((white_i, black_i), (6, 1), (7, 0)):
+            for row_i, row_values in zip((pawn_row_i, non_pawn_row_i), (Pieces.pawn.value + 1, non_pawn_row_values[0:])):
+                y_board_idxs, x_board_idxs = np.full(8, row_i), np.arange(0, 8)
+                chess_board_state_pieces_pieces_colors_square_colors[0, y_board_idxs, x_board_idxs] = row_values
+                chess_board_state_pieces_pieces_colors_square_colors[1, y_board_idxs, x_board_idxs] = piece_color_i
+                output_img.draw_board(np.column_stack((y_board_idxs, x_board_idxs)), chess_board_state_pieces_pieces_colors_square_colors)
 
-    def draw_potential_moves(idx_y_x):
+        y_empty_square_idxs = np.indices((8, 8))
+        output_img.draw_board((np.column_stack((y_empty_square_idxs[0, 2:6].flatten(), y_empty_square_idxs[1, 2:6].flatten()))), chess_board_state_pieces_pieces_colors_square_colors)
+        rook_king_rook_has_moved[0:], en_passant_tracker[0:] = 0, 0
+
+    def draw_potential_moves(piece_y_x_idx):
         nonlocal chess_board_state_pieces_pieces_colors_square_colors
-        if chess_board_state_pieces_pieces_colors_square_colors[1, idx_y_x[0], idx_y_x[1]] == current_turn_i:
-            piece_id = chess_board_state_pieces_pieces_colors_square_colors[0, idx_y_x[0], idx_y_x[1]]
+        if chess_board_state_pieces_pieces_colors_square_colors[1, piece_y_x_idx[0], piece_y_x_idx[1]] == current_turn_i:
+            piece_id = chess_board_state_pieces_pieces_colors_square_colors[0, piece_y_x_idx[0], piece_y_x_idx[1]]
             valid_squares_y_x = []
             if piece_id != 0:
                 if piece_id < 5:
@@ -245,8 +252,7 @@ def main():
                     while np.any(valid_vectors) == 1:
                         print('b')
                         for i in range(1, magnitudes):
-                            valid_vector_is = np.argwhere(valid_vectors).flatten()
-                            potential_moves = idx_y_x + vectors
+                            potential_moves = piece_y_x_idx + vectors
                             valid_squares = np.all(np.logical_and(potential_moves >= 0, potential_moves < 8), axis=1)
                             valid_square_is = np.argwhere(valid_squares).flatten()
                             valid_vectors[np.invert(valid_squares)] = 0
@@ -261,16 +267,6 @@ def main():
                                 for valid_piece in valid_pieces:
                                     valid_squares_y_x.append(potential_moves[valid_square_is[valid_piece]])
 
-
-                            if len(valid_squares_y_x) != 0:
-                                if len(valid_squares_y_x) == 1:
-                                    moves_stacked = valid_squares_y_x[0]
-                                    output_img.draw_board((moves_stacked[0], moves_stacked[1]), chess_board_state_pieces_pieces_colors_square_colors)
-                                else:
-                                    moves_stacked = np.vstack(valid_squares_y_x)
-                                    output_img.draw_board((moves_stacked[:, 0], moves_stacked[:, 1]), chess_board_state_pieces_pieces_colors_square_colors, pre_move=True)
-                                output_img.piece_idx_selected = idx_y_x
-                                output_img.drawn_potential_moves = moves_stacked
                             if i == magnitudes - 1:
                                 valid_vectors = np.array([0])
                 # King Handling
@@ -278,32 +274,116 @@ def main():
                     pass
                 # Pawn Handling
                 elif piece_id == 6:
-                    pass
+                    if current_turn_i == black_i:
+                        en_passant_i = white_i
+                        movement_vector = np.array([1, 0])
+                        attack_y_x_idxs = np.array([[1, -1],
+                                                    [1, 1]], dtype=np.int8)
+                        double_move_en_passant_y_check = (1, 4)
+                    else:
+                        en_passant_i = black_i
+                        movement_vector = np.array([-1, 0])
+                        attack_y_x_idxs = np.array([[-1, -1],
+                                                    [-1, 1]], dtype=np.int8)
+                        double_move_en_passant_y_check = (6, 3)
 
-    def draw_moves(idx_y_x, output_img_loc:Img):
+                    attack_y_x_idxs = attack_y_x_idxs + piece_y_x_idx
+                    attack_y_x_idxs = attack_y_x_idxs[np.logical_and(attack_y_x_idxs[:, 1] >= 0, attack_y_x_idxs[:, 1] <= 7)]
+                    movement_y_x_idxs = piece_y_x_idx + movement_vector
+                    if piece_y_x_idx[0] == double_move_en_passant_y_check[0]:
+                        movement_y_x_idxs = np.vstack((movement_y_x_idxs, movement_vector * 2 + piece_y_x_idx))
+                        valid_moves = chess_board_state_pieces_pieces_colors_square_colors[0, movement_y_x_idxs[:, 0], movement_y_x_idxs[:, 1]] == 0
+                    else:
+                        valid_moves = chess_board_state_pieces_pieces_colors_square_colors[0, movement_y_x_idxs[0], movement_y_x_idxs[1]] == 0
+
+                    if valid_moves.any():
+                        valid_squares_y_x.append(movement_y_x_idxs[valid_moves])
+
+                    attack_board_states = chess_board_state_pieces_pieces_colors_square_colors[0:2, attack_y_x_idxs[:, 0], attack_y_x_idxs[:, 1]]
+                    valid_attacks = np.logical_and(attack_board_states[0] != 0, attack_board_states[1] != current_turn_i)
+
+                    if piece_y_x_idx[0] == double_move_en_passant_y_check[1]:
+                        valid_attacks = np.logical_or(valid_attacks, en_passant_tracker[en_passant_i, attack_y_x_idxs[:, 1]])
+                        print('b')
+
+                    if valid_attacks.any():
+                        valid_squares_y_x.append(attack_y_x_idxs[valid_attacks])
+
+            # Draws Potential moves if available
+            if len(valid_squares_y_x) != 0:
+                if len(valid_squares_y_x) == 1:
+                    valid_squares_y_x_arr = valid_squares_y_x[0]
+                else:
+                    valid_squares_y_x_arr = np.vstack(valid_squares_y_x)
+                output_img.draw_board(valid_squares_y_x_arr, chess_board_state_pieces_pieces_colors_square_colors, pre_move=True)
+                output_img.piece_idx_selected = piece_y_x_idx
+                output_img.drawn_potential_moves = valid_squares_y_x_arr
+
+    def draw_moves(selected_move_yx, output_img_loc: Img):
         nonlocal current_turn_i
-        selected_idx, drawn_idxs = output_img_loc.piece_idx_selected, output_img_loc.drawn_potential_moves
-        drawn_idx_compare = np.all(drawn_idxs == idx_y_x, axis=1)
+        selected_piece_idx_yx, drawn_idxs = output_img_loc.piece_idx_selected, output_img_loc.drawn_potential_moves
+        drawn_idx_compare = np.all(drawn_idxs == selected_move_yx, axis=1)
         in_drawn_idxs = np.argwhere(drawn_idx_compare).flatten()
         if in_drawn_idxs.shape[0] != 0:
-            chess_board_state_pieces_pieces_colors_square_colors[0:2, idx_y_x[0], idx_y_x[1]] = chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_idx[0], selected_idx[1]]
-            chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_idx[0], selected_idx[1]] = (0, 0)
-            draw_idxs = np.vstack((selected_idx, idx_y_x))
-            output_img_loc.draw_board((draw_idxs[:, 0], draw_idxs[:, 1]), chess_board_state_pieces_pieces_colors_square_colors)
-            output_img_loc.draw_board((drawn_idxs[:, 0], drawn_idxs[:, 1]), chess_board_state_pieces_pieces_colors_square_colors)
+            draw_idxs = np.vstack((selected_piece_idx_yx, selected_move_yx))
+            current_piece_i = chess_board_state_pieces_pieces_colors_square_colors[0, selected_piece_idx_yx[0], selected_piece_idx_yx[1]] - 1
+
+            if current_piece_i == Pieces.rook.value:
+                if selected_piece_idx_yx[1] == 7:
+                    rook_king_rook_has_moved[current_turn_i, 2] = 1
+                else:
+                    rook_king_rook_has_moved[current_turn_i, 0] = 1
+            elif current_piece_i == Pieces.king.value:
+                if selected_piece_idx_yx[1] == 4:
+                    rook_king_rook_has_moved[current_turn_i, 1] = 1
+            elif current_piece_i == Pieces.pawn.value:
+                if abs(selected_piece_idx_yx[0] - selected_move_yx[0]) == 2:
+                    en_passant_tracker[current_turn_i, selected_piece_idx_yx[1]] = 1
+                #En Passant Capture, no piece present, set the board state capture
+                else:
+                    # Capture made, check for en passant draw necessity
+                    if selected_move_yx[1] - selected_piece_idx_yx[1] != 0:
+                        #Black Capture
+                        if selected_move_yx[0] - selected_piece_idx_yx[0] == 1:
+                            #Black Capture En Passant
+                            if chess_board_state_pieces_pieces_colors_square_colors[0, selected_move_yx[0], selected_move_yx[1]] == 0:
+                                chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_move_yx[0] - 1, selected_move_yx[1]] = (0, 0)
+                                draw_idxs = np.vstack((draw_idxs, (selected_move_yx[0] - 1, selected_move_yx[1])))
+                        #White Capture
+                        else:
+                            if chess_board_state_pieces_pieces_colors_square_colors[0, selected_move_yx[0], selected_move_yx[1]] == 0:
+                                chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_move_yx[0] + 1, selected_move_yx[1]] = (0, 0)
+                                draw_idxs = np.vstack((draw_idxs, (selected_move_yx[0] + 1, selected_move_yx[1])))
+                            print('b')
+
+                if current_turn_i == black_i:
+                    if selected_piece_idx_yx[0] == 7:
+                        print('b')
+                    elif selected_piece_idx_yx[0] == 0:
+                        print('b')
+                        pass
+
+
+
+            chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_move_yx[0], selected_move_yx[1]] = chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_piece_idx_yx[0], selected_piece_idx_yx[1]]
+            chess_board_state_pieces_pieces_colors_square_colors[0:2, selected_piece_idx_yx[0], selected_piece_idx_yx[1]] = (0, 0)
+            output_img_loc.draw_board(draw_idxs, chess_board_state_pieces_pieces_colors_square_colors)
+            output_img_loc.draw_board(drawn_idxs, chess_board_state_pieces_pieces_colors_square_colors)
             output_img_loc.piece_idx_selected, output_img_loc.drawn_potential_moves = None, None
             if current_turn_i == white_i:
                 current_turn_i = black_i
             else:
                 current_turn_i = white_i
+            en_passant_tracker[current_turn_i] = 0
 
     output_img = Img()
     current_turn_i = white_i
 
     chess_board_state_pieces_pieces_colors_square_colors, movement_vectors, movement_magnitudes = setup()
-    en_passant_tracker = np.zeros((2, 8), dtype=np.uint0)
-    output_img.set_starting_board_state(chess_board_state_pieces_pieces_colors_square_colors)
+    rook_king_rook_has_moved, en_passant_tracker = np.zeros((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0)
+    set_starting_board_state()
     cv2.namedWindow('Chess')
+
     def mouse_handler(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             if output_img.click_is_on_board(x, y):
@@ -313,7 +393,6 @@ def main():
                     pass
                 else:
                     draw_potential_moves(idx_y_x)
-
 
                 print('on_board')
 
