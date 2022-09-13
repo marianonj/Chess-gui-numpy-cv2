@@ -170,7 +170,6 @@ class Img:
         self.drawn_moves = draw_idxs
 
 
-
 white_i, black_i = 0, 1
 non_capture_draw_i, capture_draw_i = 0, 1
 
@@ -227,12 +226,53 @@ def return_non_pawn_movement_vectors_and_magnitudes():
     return vector_views, vector_magnitudes
 
 
+
 def return_white_squares_grid():
     chess_board_square_indicies = np.sum(np.indices((8, 8), dtype=np.uint8), axis=0)
     chess_board_white_squares_idxs = np.argwhere(chess_board_square_indicies % 2 == 0)
     chess_board_white_squares = np.full_like(chess_board_square_indicies, fill_value=black_i, dtype=np.uint0)
     chess_board_white_squares[chess_board_white_squares_idxs[:, 0], chess_board_white_squares_idxs[:, 1]] = white_i
     return chess_board_white_squares
+
+
+def return_potential_moves(piece_y_x_idx, movement_vector, magnitude, board_state, current_turn_i, obstruction_check=False) -> list:
+    valid_squares_y_x = []
+    valid_vectors = np.ones(movement_vector.shape[0], dtype=np.uint0)
+
+    for i in range(1, magnitude):
+        valid_vector_idxs = np.argwhere(valid_vectors).flatten()
+
+        potential_moves = piece_y_x_idx + (movement_vector[valid_vector_idxs]) * i
+        valid_squares = np.all(np.logical_and(potential_moves >= 0, potential_moves < 8), axis=1)
+        valid_square_is = np.argwhere(valid_squares).flatten()
+        valid_vectors[valid_vector_idxs[np.invert(valid_squares)]] = 0
+
+        valid_potential_moves = potential_moves[valid_square_is]
+        valid_vector_idxs = valid_vector_idxs[valid_square_is]
+        piece_identities_colors = board_state[0:2, valid_potential_moves[:, 0], valid_potential_moves[:, 1]]
+        empty_squares = np.argwhere(piece_identities_colors[0] == 0).flatten()
+        valid_pieces = np.argwhere(piece_identities_colors[0] != 0).flatten()
+
+        print('b')
+        if not obstruction_check:
+            if empty_squares.shape[0] != 0:
+                for empty_square_i in empty_squares:
+                    valid_squares_y_x.append(valid_potential_moves[empty_square_i])
+            if valid_pieces.shape[0] != 0:
+                valid_opponent_pieces = np.argwhere(piece_identities_colors[1, valid_pieces] != current_turn_i).flatten()
+                if valid_opponent_pieces.shape[0] != 0:
+                    valid_squares_y_x.append(potential_moves[valid_square_is[valid_pieces[valid_opponent_pieces]]])
+                valid_vectors[valid_vector_idxs[valid_pieces]] = 0
+        else:
+            if valid_pieces.shape[0] != 0:
+                valid_squares_y_x.append(potential_moves[valid_square_is[valid_pieces]])
+                valid_vectors[valid_vector_idxs[valid_pieces]] = 0
+
+        if np.all(valid_vectors == 0):
+            print('b')
+            break
+    return valid_squares_y_x
+
 
 
 def setup():
@@ -244,8 +284,27 @@ def setup():
 
 
 def main():
+    def set_obstructing_piece_idxs(affected_vector, initial_setup):
+        nonlocal king_closest_obstructing_pieces_is
+        if initial_setup:
+            king_vectors = movement_vectors[Pieces.king.value]
+
+            for i, king_position_yx in enumerate(king_positions_yx):
+                pass
+
+            pass
+        else:
+            pass
+
+
+
+
+
+
+        pass
+
     def set_starting_board_state(fisher=False):
-        nonlocal rook_king_rook_has_moved, en_passant_tracker
+        nonlocal rook_king_rook_has_moved, en_passant_tracker, king_closest_obstructing_pieces_is
         if not fisher:
             non_pawn_row_values = np.array([Pieces.rook.value, Pieces.knight.value, Pieces.bishop.value, Pieces.queen.value, Pieces.king.value, Pieces.bishop.value, Pieces.knight.value, Pieces.rook.value]) + 1
         else:
@@ -269,47 +328,8 @@ def main():
             valid_squares_y_x = []
             if piece_id != 0:
                 if piece_id < 5:
-                    vectors, magnitudes = movement_vectors[piece_id - 1], movement_magnitudes[piece_id - 1]
-                    valid_vectors = np.ones(vectors.shape[0], dtype=np.uint0)
-
-                    for i in range(1, magnitudes):
-                        valid_vector_idxs = np.argwhere(valid_vectors).flatten()
-
-                        potential_moves = piece_y_x_idx + (vectors[valid_vector_idxs]) * i
-                        valid_squares = np.all(np.logical_and(potential_moves >= 0, potential_moves < 8), axis=1)
-                        valid_square_is = np.argwhere(valid_squares).flatten()
-                        valid_vectors[valid_vector_idxs[np.invert(valid_squares)]] = 0
-
-
-
-                        valid_potential_moves = potential_moves[valid_square_is]
-                        valid_vector_idxs = valid_vector_idxs[valid_square_is]
-                        piece_identities_colors = board_state_pieces_colors_squares[0:2, valid_potential_moves[:, 0], valid_potential_moves[:, 1]]
-                        empty_squares = np.argwhere(piece_identities_colors[0] == 0).flatten()
-                        valid_pieces = np.argwhere(piece_identities_colors[0] != 0).flatten()
-
-                        print('b')
-
-                        if empty_squares.shape[0] != 0:
-                            for empty_square_i in empty_squares:
-                                valid_squares_y_x.append(valid_potential_moves[empty_square_i])
-                        if valid_pieces.shape[0] != 0:
-                            valid_opponent_pieces = np.argwhere(piece_identities_colors[1, valid_pieces] != current_turn_i).flatten()
-                            if valid_opponent_pieces.shape[0] != 0:
-                                valid_squares_y_x.append(potential_moves[valid_square_is[valid_pieces[valid_opponent_pieces]]])
-                            valid_vectors[valid_vector_idxs[valid_pieces]] = 0
-
-                        if np.all(valid_vectors == 0):
-                            print('b')
-                            break
-
-
-
-
-
-
-
-
+                    vectors, magnitude = movement_vectors[piece_id - 1], movement_magnitudes[piece_id - 1]
+                    valid_squares_y_x = return_potential_moves(piece_y_x_idx, vectors, magnitude, board_state_pieces_colors_squares, current_turn_i)
                 # King Handling
                 elif piece_id == 5:
                     pass
@@ -427,7 +447,11 @@ def main():
     current_turn_i = white_i
 
     board_state_pieces_colors_squares, movement_vectors, movement_magnitudes = setup()
+    move_count, minimum_theoretical_stalemate_move_count = 0, 10
     rook_king_rook_has_moved, en_passant_tracker, king_check_tracker = np.zeros((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0), np.array([0, 0], dtype=np.uint0)
+    king_positions_yx = np.array([[7, 5], [0, 5]], dtype=np.uint8)
+    king_closest_obstructing_pieces_is = np.zeros((2, 2, 9), dtype=np.uint8)
+
     set_starting_board_state()
     cv2.namedWindow(Img.window_name)
 
