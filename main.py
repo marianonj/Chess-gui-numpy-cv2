@@ -284,14 +284,13 @@ def setup():
 
 
 def main():
-    def set_obstructing_piece_idxs(affected_vector, initial_setup):
+    def set_obstructing_piece_idxs(vectors, initial_setup=False):
         nonlocal king_closest_obstructing_pieces_is
         if initial_setup:
-            king_vectors = movement_vectors[Pieces.king.value]
-
             for i, king_position_yx in enumerate(king_positions_yx):
-                pass
-
+                moves = king_position_yx + vectors
+                valid_square_is = np.argwhere(np.all(np.logical_and(moves >= 0, moves <= 7), axis=1)).flatten()
+                king_closest_obstructing_pieces_is[i, valid_square_is] = moves[valid_square_is]
             pass
         else:
             pass
@@ -320,6 +319,7 @@ def main():
         y_empty_square_idxs = np.indices((8, 8))
         o_img.draw_board((np.column_stack((y_empty_square_idxs[0, 2:6].flatten(), y_empty_square_idxs[1, 2:6].flatten()))), board_state_pieces_colors_squares)
         rook_king_rook_has_moved[0:], en_passant_tracker[0:] = 0, 0
+        set_obstructing_piece_idxs(movement_vectors[Pieces.king.value], initial_setup=True)
 
     def draw_potential_moves(piece_y_x_idx):
         nonlocal board_state_pieces_colors_squares
@@ -450,7 +450,7 @@ def main():
     move_count, minimum_theoretical_stalemate_move_count = 0, 10
     rook_king_rook_has_moved, en_passant_tracker, king_check_tracker = np.zeros((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0), np.array([0, 0], dtype=np.uint0)
     king_positions_yx = np.array([[7, 5], [0, 5]], dtype=np.uint8)
-    king_closest_obstructing_pieces_is = np.zeros((2, 2, 9), dtype=np.uint8)
+    king_closest_obstructing_pieces_is = 8 * np.ones((2, 9, 2), dtype=np.uint8)
 
     set_starting_board_state()
     cv2.namedWindow(Img.window_name)
