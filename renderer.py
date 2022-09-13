@@ -9,8 +9,5 @@ class Img2D:
 
 
 
-def return_img_arrays():
-
-
-
-    pass
+a = np.array([[0]],[0], [0])
+print(a[:,0])
