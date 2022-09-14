@@ -240,7 +240,7 @@ def return_white_squares_grid():
     return chess_board_white_squares
 
 
-def return_potential_moves(piece_y_x_idx: tuple, movement_vectors: tuple, magnitudes: tuple, board_state: np.ndarray, current_turn_i: int, check_type: str = 'moves') -> np.ndarray or None:
+def return_potential_moves(piece_y_x_idx: tuple, movement_vectors: tuple, magnitudes: tuple, board_state: np.ndarray, current_turn_i: int, check_type: str = 'moves') -> np.ndarray or None or False:
     valid_squares_yx = []
 
     for movement_vector, magnitude in zip(movement_vectors, magnitudes):
@@ -303,7 +303,6 @@ def return_potential_moves(piece_y_x_idx: tuple, movement_vectors: tuple, magnit
                                                                 np.array([Pieces.queen.value, Pieces.bishop.value, Pieces.king.value], dtype=np.uint8) + 1, \
                                                                 np.array([Pieces.knight.value + 1], dtype=np.uint8) + 1
 
-
                                 for i, vector_type in enumerate(vector_types):
                                     if magnitude_i == 1:
                                         print('b')
@@ -316,20 +315,19 @@ def return_potential_moves(piece_y_x_idx: tuple, movement_vectors: tuple, magnit
                                             if piece_id in accepted_piece_ids:
                                                 return False
                     valid_vectors[valid_vector_idxs[valid_pieces]] = 0
-        if check_type == 'moves':
-            if len(valid_squares_yx) != 0:
-                if len(valid_squares_yx) == 1:
-                    if len(valid_squares_yx[0].shape) == 1:
-                        valid_squares_yx = np.array([valid_squares_yx[0]])
-                    else:
-                        valid_squares_yx = valid_squares_yx[0]
-                else:
-                    valid_squares_yx = np.vstack(valid_squares_yx)
-                return valid_squares_yx
+
+    if len(valid_squares_yx) != 0:
+        if len(valid_squares_yx) == 1:
+            if len(valid_squares_yx[0].shape) == 1:
+                valid_squares_yx = np.array([valid_squares_yx[0]])
             else:
-                return None
+                valid_squares_yx = valid_squares_yx[0]
         else:
-            return True
+            valid_squares_yx = np.vstack(valid_squares_yx)
+        return valid_squares_yx
+    else:
+        return None
+
 
 
 
@@ -394,10 +392,8 @@ def main():
                         for i, single_move in enumerate(single_moves):
                             square_is_not_protected = return_potential_moves(single_move, (movement_vectors[Pieces.queen.value], movement_vectors[Pieces.knight.value],), (movement_magnitudes[Pieces.queen.value], movement_magnitudes[Pieces.knight.value]), board_state_pieces_colors_squares,
                                                                        current_turn_i, check_type='protection')
-                            if square_is_not_protected:
+                            if square_is_not_protected is None:
                                 valid_single_moves[i] = 1
-                            else:
-                                print('b')
                         if np.any(valid_single_moves != 0):
                             valid_squares_yx = single_moves[np.argwhere(valid_single_moves).flatten()]
 
