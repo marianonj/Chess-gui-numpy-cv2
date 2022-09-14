@@ -315,25 +315,26 @@ def return_potential_moves(piece_y_x_idx: tuple, movement_vectors: tuple, magnit
                                             print('b')
                                             if piece_id in accepted_piece_ids:
                                                 return False
-                        return True
-
                     valid_vectors[valid_vector_idxs[valid_pieces]] = 0
-
-            if np.all(valid_vectors == 0):
-                print('b')
-                break
-
-    if len(valid_squares_yx) != 0:
-        if len(valid_squares_yx) == 1:
-            if len(valid_squares_yx[0].shape) == 1:
-                valid_squares_yx = np.array([valid_squares_yx[0]])
+        if check_type == 'moves':
+            if len(valid_squares_yx) != 0:
+                if len(valid_squares_yx) == 1:
+                    if len(valid_squares_yx[0].shape) == 1:
+                        valid_squares_yx = np.array([valid_squares_yx[0]])
+                    else:
+                        valid_squares_yx = valid_squares_yx[0]
+                else:
+                    valid_squares_yx = np.vstack(valid_squares_yx)
+                return valid_squares_yx
             else:
-                valid_squares_yx = valid_squares_yx[0]
+                return None
         else:
-            valid_squares_yx = np.vstack(valid_squares_yx)
-        return valid_squares_yx
-    else:
-        return None
+            return True
+
+
+
+
+
 
 
 def setup():
