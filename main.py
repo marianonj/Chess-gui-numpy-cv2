@@ -365,7 +365,7 @@ def main():
 
         y_empty_square_idxs = np.indices((8, 8))
         o_img.draw_board((np.column_stack((y_empty_square_idxs[0, 2:6].flatten(), y_empty_square_idxs[1, 2:6].flatten()))), board_state_pieces_colors_squares)
-        rook_king_rook_has_not_moved[0:], en_passant_tracker[0:] = 1, 1
+        rook_king_rook_has_not_moved, en_passant_tracker = np.ones((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0)
         set_obstructing_piece_idxs(movement_vectors[Pieces.king.value], initial_setup=True)
 
     def draw_potential_moves(piece_yx_idx):
@@ -393,7 +393,7 @@ def main():
                             valid_squares_yx = single_moves[np.argwhere(valid_single_moves).flatten()]
                             if rook_king_rook_has_not_moved[current_turn_i, 1]:
                                 for rook_has_moved_i, rook_x_value, king_x_offset in zip((0, 2), (0, 7), (-2, 2)):
-                                    if rook_king_rook_has_not_moved[current_turn_i, rook_has_moved_i] != 0:
+                                    if rook_king_rook_has_not_moved[current_turn_i, rook_has_moved_i]:
                                         castle_x_idxs = np.arange(min(rook_x_value, piece_yx_idx[1]), max(rook_x_value, piece_yx_idx[1]))
                                         castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
 
@@ -479,12 +479,31 @@ def main():
 
             if current_piece_i == Pieces.rook.value:
                 if selected_piece_idx_yx[1] == 7:
-                    rook_king_rook_has_not_moved[current_turn_i, 2] = 1
-                else:
-                    rook_king_rook_has_not_moved[current_turn_i, 0] = 1
+                    rook_king_rook_has_not_moved[current_turn_i, 2] = 0
+                    print('b')
+                elif selected_piece_idx_yx[1] == 0:
+                    rook_king_rook_has_not_moved[current_turn_i, 0] = 0
+                    print('b')
             elif current_piece_i == Pieces.king.value:
                 if selected_piece_idx_yx[1] == 4:
-                    rook_king_rook_has_not_moved[current_turn_i, 1] = 1
+                    #Castle
+                    if abs(selected_move_yx[1] - selected_piece_idx_yx[1]) == 2:
+                        if selected_move_yx[1] > selected_piece_idx_yx[1]:
+                            board_state_pieces_colors_squares[0:2, selected_piece_idx_yx[0], selected_move_yx[1] - 1] = Pieces.rook.value + 1, current_turn_i
+                            board_state_pieces_colors_squares[0:2, selected_piece_idx_yx[0], 7] = 0, 0
+
+                            draw_idxs = np.vstack((draw_idxs, np.array([[selected_piece_idx_yx[0], selected_move_yx[1] - 1],
+                                                                        [selected_piece_idx_yx[0], 7]])))
+
+                        else:
+                            board_state_pieces_colors_squares[0:2, selected_piece_idx_yx[0], selected_move_yx[1] + 1] = Pieces.rook.value + 1, current_turn_i
+                            board_state_pieces_colors_squares[0:2, selected_piece_idx_yx[0], 0] = 0
+                            draw_idxs = np.vstack((draw_idxs, np.array([[selected_piece_idx_yx[0], selected_move_yx[1] + 1],
+                                                                        [selected_piece_idx_yx[0], 0]])))
+                rook_king_rook_has_not_moved[current_turn_i, 1] = 0
+
+
+
             elif current_piece_i == Pieces.pawn.value:
                 if abs(selected_piece_idx_yx[0] - selected_move_yx[0]) == 2:
                     en_passant_tracker[current_turn_i, selected_piece_idx_yx[1]] = 1
