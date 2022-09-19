@@ -253,6 +253,18 @@ def setup():
 
 def main():
     board_state_pieces_colors_squares, movement_vectors, movement_magnitudes = setup()
+    turn_i_current_opponent = (white_i, black_i)
+    o_img = Img()
+    move_count, minimum_theoretical_stalemate_move_count = 0, 10
+    rook_king_rook_has_not_moved, en_passant_tracker = np.zeros((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0)
+    king_in_check_valid_piece_idxs, king_in_check_valid_moves = [None, None], [[], []]
+
+    king_positions_yx = np.array([[7, 4], [0, 4]], dtype=np.uint8)
+    king_closest_obstructing_pieces_is = 8 * np.ones((2, 9, 2), dtype=np.uint8)
+    obstructing_piece_identities = (np.array([Pieces.queen.value, Pieces.rook.value], dtype=np.uint8),
+                                    np.array([Pieces.queen.value, Pieces.bishop.value], dtype=np.uint8),
+                                    np.array([Pieces.knight.value], dtype=np.uint8))
+    cv2.namedWindow(Img.window_name)
 
     def square_is_protected(potential_protection_vectors, potential_piece_ids, magnitude_i) -> bool:
         # Orthogonal, Diagonal, Knight
@@ -265,25 +277,21 @@ def main():
             if vector_type.shape[0] != 0:
                 for vector_type_i_idx in vector_type:
                     piece_id = potential_piece_ids[vector_type_i_idx]
-                    if magnitude_i == 1 and i == 1:
-                        accepted_piece_ids = np.hstack((obstructing_piece_identities[i], Pieces.value.pawn + 1))
+                    if magnitude_i == 1:
+                        if i == 0:
+                            accepted_piece_ids = np.hstack((obstructing_piece_identities[i], Pieces.king.value))
+                        elif i == 1:
+                            accepted_piece_ids = np.hstack((obstructing_piece_identities[i], Pieces.pawn.value))
+                        else:
+                            accepted_piece_ids = obstructing_piece_identities[i]
                     else:
                         accepted_piece_ids = obstructing_piece_identities[i]
 
                     if piece_id in accepted_piece_ids:
                         return True
                     else:
-                        print('b')
-
+                        return False
         return False
-
-    def set_obstructing_piece_idxs(vectors, initial_setup=False):
-        nonlocal king_closest_obstructing_pieces_is
-        if initial_setup:
-            for i, king_position_yx in enumerate(king_positions_yx):
-                moves = king_position_yx + vectors
-                valid_square_is = np.argwhere(np.all(np.logical_and(moves >= 0, moves <= 7), axis=1)).flatten()
-                king_closest_obstructing_pieces_is[i, valid_square_is] = moves[valid_square_is]
 
     def set_starting_board_state(fisher=False):
         nonlocal rook_king_rook_has_not_moved, en_passant_tracker, king_closest_obstructing_pieces_is
@@ -304,6 +312,7 @@ def main():
         rook_king_rook_has_not_moved, en_passant_tracker = np.ones((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0)
         for i in (white_i, black_i):
             update_king_obstruction_array(king_positions_yx[i], king_closest_obstructing_pieces_is[i])
+            print('b')
 
     def return_vector_ranges(start_yx, end_yx, orthogonal):
         if orthogonal:
@@ -333,19 +342,6 @@ def main():
 
             compare_idxs_yx = np.column_stack((np.arange(start_y_range, end_y_range), np.arange(start_x_range, end_x_range)))
         return compare_idxs_yx
-
-    def opponent_has_no_valid_moves(check_vector_magnitude=None, checking_piece_yx=None, king_yx=None, orthogonal_check=False):
-        valid_pieces_idxs = np.argwhere(np.logical_and(np.logical_and(board_state_pieces_colors_squares[0] != 0, board_state_pieces_colors_squares[0] != Pieces.king.value), board_state_pieces_colors_squares[1] == turn_i_current_opponent[1]))
-        valid_pieces_ids = board_state_pieces_colors_squares[2, valid_pieces_idxs[:, 0], valid_pieces_idxs[:, 1]]
-        if check_vector_magnitude is not None:
-            if check_vector_magnitude == 1:
-                valid_move_squares = checking_piece_yx
-            else:
-                valid_move_squares = return_vector_ranges(king_yx, checking_piece_yx, orthogonal_check)
-            for valid_pieces_idx, piece_id in zip(valid_pieces_idxs, valid_pieces_ids):
-                potential_moves = return_potential_moves(valid_pieces_idx, (piece_id - 1,))
-
-        return False
 
     def return_potential_moves(piece_yx_idx: tuple, piece_ids: Tuple[int, ...], check_type: str = 'moves', pawn_movement=False, pawn_attack=False, en_passant_check=False, obstruction_check=False, vector_magnitude_overwrite=(None, None)) -> np.ndarray or None or False:
         valid_squares_yx = []
@@ -387,14 +383,22 @@ def main():
                     if next_piece_yx is not None:
                         next_piece_properties = board_state_pieces_colors_squares[0:2, next_piece_yx[:, 0], next_piece_yx[:, 1]]
                         potential_protection_vector = np.array([movement_vectors[Pieces.king.value][obstruction_vector_i]])
-                        # If the next piece is a valid piece protecting it, the chosen piece can only move on that given vector
-                        if next_piece_properties[1] == turn_i_current_opponent[1]:
-                            magnitude_i = np.max(np.abs(next_piece_yx - king_positions_yx[turn_i_current_opponent[0]]))
-                            if square_is_protected(potential_protection_vector, (next_piece_properties[0]), magnitude_i):
+                        if np.any(potential_protection_vector == 0) and next_piece_properties[0, 0] - 1 in obstructing_piece_identities[0] or next_piece_properties[0, 0] - 1 in obstructing_piece_identities[1]:
+                            if next_piece_properties[1] == turn_i_current_opponent[1]:
                                 if np.any(np.all(vectors == potential_protection_vector, axis=1)):
                                     vectors = potential_protection_vector
                                 else:
                                     magnitude = 1
+
+                                '''magnitude_i = np.max(np.abs(next_piece_yx - king_positions_yx[turn_i_current_opponent[0]]))
+                                if square_is_protected(potential_protection_vector, (next_piece_properties[0]), magnitude_i):
+                                    if np.any(np.all(vectors == potential_protection_vector, axis=1)):
+                                        vectors = potential_protection_vector
+                                    else:
+                                        magnitude = 1'''
+
+                        # If the next piece is a valid piece protecting it, the chosen piece can only move on that given vector
+
 
                         # Otherwise, the next piece is a piece of the same side, and set that as the potential next obstructing piece
                         '''else:
@@ -439,7 +443,7 @@ def main():
                             valid_squares_yx.append(potential_moves[valid_square_is[valid_pieces]])
                         elif check_type == 'protection':
                             if valid_pieces.shape[0] != 0:
-                                valid_ally_pieces = np.argwhere(piece_identities_colors[1, valid_pieces] != turn_i_current_opponent[0]).flatten()
+                                valid_ally_pieces = np.argwhere(piece_identities_colors[1, valid_pieces] == turn_i_current_opponent[1]).flatten()
                                 if valid_ally_pieces.shape[0] != 0:
                                     potential_protection_moves = valid_potential_moves[valid_pieces[valid_ally_pieces]]
                                     # Vector types are Orthogonal, Diagonal, and Knight
@@ -447,14 +451,13 @@ def main():
                                     if len(potential_protection_moves.shape) == 1:
                                         potential_protection_moves = np.array([[potential_protection_moves]])
 
-                                    potential_protection_piece_ids = board_state_pieces_colors_squares[0, potential_protection_moves[:, 0], potential_protection_moves[:, 1]]
+                                    potential_protection_piece_ids = board_state_pieces_colors_squares[0, potential_protection_moves[:, 0], potential_protection_moves[:, 1]] - 1
                                     potential_protection_vectors = vectors[valid_vector_idxs[valid_pieces[valid_ally_pieces]]]
                                     if square_is_protected(potential_protection_vectors, potential_protection_piece_ids, magnitude_i):
                                         return False
 
                         valid_vectors[valid_vector_idxs[valid_pieces]] = 0
                 if np.all(valid_vectors == 0):
-                    print('b')
                     break
 
         if len(valid_squares_yx) != 0:
@@ -470,49 +473,58 @@ def main():
             return None
 
     def draw_potential_moves(piece_yx_idx):
-        nonlocal board_state_pieces_colors_squares, rook_king_rook_has_not_moved
-        if board_state_pieces_colors_squares[1, piece_yx_idx[0], piece_yx_idx[1]] == turn_i_current_opponent[0]:
-            piece_id = board_state_pieces_colors_squares[0, piece_yx_idx[0], piece_yx_idx[1]] - 1
-            valid_squares_yx = None
-            if piece_id != -1:
-                if piece_id == Pieces.king.value:
-                    single_moves = return_potential_moves(piece_yx_idx, (Pieces.king.value,))
-                    if single_moves is not None:
-                        valid_single_moves = np.ones(single_moves.shape[0], dtype=np.uint0)
-                        for i, single_move in enumerate(single_moves):
-                            square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
-                            if square_is_not_protected is not None:
-                                valid_single_moves[i] = 0
-                        # Castle Check
-                        if np.any(valid_single_moves != 0):
-                            valid_squares_yx = single_moves[np.argwhere(valid_single_moves).flatten()]
-                            if rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1]:
-                                for rook_has_moved_i, rook_x_value, king_x_offset in zip((0, 2), (0, 7), (-2, 2)):
-                                    if rook_king_rook_has_not_moved[turn_i_current_opponent[0], rook_has_moved_i]:
-                                        if rook_x_value > piece_yx_idx[1]:
-                                            castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_value)
-                                        else:
-                                            castle_x_idxs = np.arange(rook_x_value + 1, piece_yx_idx[1])
-                                        castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
-                                        if np.all(board_state_pieces_colors_squares[0, castle_idxs_all[:, 0], castle_idxs_all[:, 1]] == 0):
-                                            castle_bool = True
-                                            for castle_idx in castle_idxs_all:
-                                                square_is_not_protected = return_potential_moves(castle_idx, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
-                                                if square_is_not_protected is not None:
-                                                    castle_bool = False
-                                                    break
-                                            if castle_bool:
-                                                valid_squares_yx = np.vstack((valid_squares_yx, np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)))
-                else:
-                    valid_squares_yx = return_potential_moves(piece_yx_idx, (piece_id,), obstruction_check=True)
+        nonlocal board_state_pieces_colors_squares
+        valid_squares_yx = None
+        if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
+            if board_state_pieces_colors_squares[1, piece_yx_idx[0], piece_yx_idx[1]] == turn_i_current_opponent[0]:
+                piece_id = board_state_pieces_colors_squares[0, piece_yx_idx[0], piece_yx_idx[1]] - 1
+                if piece_id != -1:
+                    if piece_id == Pieces.king.value:
+                        single_moves = return_potential_moves(piece_yx_idx, (Pieces.king.value,))
+                        if single_moves is not None:
+                            valid_single_moves = np.ones(single_moves.shape[0], dtype=np.uint0)
+                            for i, single_move in enumerate(single_moves):
+                                square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                                if square_is_not_protected is not None:
+                                    valid_single_moves[i] = 0
+                            # Castle Check
+                            if np.any(valid_single_moves != 0):
+                                valid_squares_yx = single_moves[np.argwhere(valid_single_moves).flatten()]
+                                if rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1]:
+                                    for rook_has_moved_i, rook_x_value, king_x_offset in zip((0, 2), (0, 7), (-2, 2)):
+                                        if rook_king_rook_has_not_moved[turn_i_current_opponent[0], rook_has_moved_i]:
+                                            if rook_x_value > piece_yx_idx[1]:
+                                                castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_value)
+                                            else:
+                                                castle_x_idxs = np.arange(rook_x_value + 1, piece_yx_idx[1])
+                                            castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
+                                            if np.all(board_state_pieces_colors_squares[0, castle_idxs_all[:, 0], castle_idxs_all[:, 1]] == 0):
+                                                castle_bool = True
+                                                for castle_idx in castle_idxs_all:
+                                                    square_is_not_protected = return_potential_moves(castle_idx, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                                                    if square_is_not_protected is not None:
+                                                        castle_bool = False
+                                                        break
+                                                if castle_bool:
+                                                    valid_squares_yx = np.vstack((valid_squares_yx, np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)))
+                    else:
+                        valid_squares_yx = return_potential_moves(piece_yx_idx, (piece_id,), obstruction_check=True)
+
+        else:
+            valid_piece_to_prevent_check = np.all(king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] == piece_yx_idx, axis=1)
+            if valid_piece_to_prevent_check.any():
+                valid_piece_i = np.argwhere(valid_piece_to_prevent_check).flatten()
+                valid_squares_yx = king_in_check_valid_moves[int(turn_i_current_opponent[0])][int(valid_piece_i)]
+
+
 
                 # Pawn Handling
 
             # Draws Potential moves if available
-            if valid_squares_yx is not None:
-                o_img.draw_board(valid_squares_yx, board_state_pieces_colors_squares, pre_move=True)
-                o_img.piece_idx_selected = piece_yx_idx
-                o_img.drawn_moves = valid_squares_yx
+        if valid_squares_yx is not None:
+            o_img.draw_board(valid_squares_yx, board_state_pieces_colors_squares, pre_move=True)
+            o_img.piece_idx_selected = piece_yx_idx
+            o_img.drawn_moves = valid_squares_yx
 
     def update_king_obstruction_array(king_position_yx, king_obstruction_array):
         obstructing_idxs = return_potential_moves(king_position_yx, (Pieces.queen.value,), check_type='obstruction')
@@ -520,12 +532,11 @@ def main():
             obstructing_signs = np.sign(obstructing_idxs - (king_position_yx[0], king_position_yx[1]))
             valid_obstruction_vector_idxs = (movement_vectors[Pieces.king.value][:, None] == obstructing_signs).all(-1).any(-1)
             king_obstruction_array[np.argwhere(valid_obstruction_vector_idxs).flatten()] = obstructing_idxs
-            king_obstruction_array[np.invert(np.argwhere(valid_obstruction_vector_idxs).flatten())] = (8, 8)
+            king_obstruction_array[np.argwhere(np.invert(valid_obstruction_vector_idxs)).flatten()] = (8, 8)
 
-    def opponent_is_in_check(piece_id, initial_yx, selected_yx):
+    def opponent_is_in_check(piece_id, initial_yx, selected_yx) -> (list, list):
         checking_pieces_idxs, checking_obstruction_squares = [], []
         opposing_king_yx = king_positions_yx[turn_i_current_opponent[1]]
-        opponent_in_check = False
 
         # Checks for a check caused by the piece's movement clearing an attack to the king
         if np.all(king_closest_obstructing_pieces_is[turn_i_current_opponent[1]] == initial_yx, axis=1).any():
@@ -533,7 +544,7 @@ def main():
             vector_sign = np.sign(vector)
             vector_i = np.argwhere(np.all(king_closest_obstructing_pieces_is[turn_i_current_opponent[1]] == initial_yx, axis=1))
             # The piece moving has created a potentially new obstruction
-            obstruction_check_yxs = return_potential_moves(initial_yx, (0,), vector_magnitude_overwrite=((vector_sign,), (9,)))
+            obstruction_check_yxs = return_potential_moves(initial_yx, (0,), vector_magnitude_overwrite=((np.array([vector_sign]),), (9,)))
             if obstruction_check_yxs is not None:
                 board_state = board_state_pieces_colors_squares[0:2, obstruction_check_yxs[:, 0], obstruction_check_yxs[:, 1]]
                 # Valid Piece
@@ -553,50 +564,70 @@ def main():
 
         # Checks for a check caused by the actual piece's attack vector
         check_moves = return_potential_moves(selected_yx, (piece_id,))
-        if np.all(opposing_king_yx == check_moves, axis=1).any():
-            checking_pieces_idxs.append(selected_yx)
-            if piece_id != Pieces.knight.value and Pieces != Pieces.pawn.value:
-                if piece_id in obstructing_piece_identities[0]:
-                    vector_ranges = return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=True)
-                else:
-                    vector_ranges = return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=False)
+        if check_moves is not None:
+            if np.all(opposing_king_yx == check_moves, axis=1).any():
+                checking_pieces_idxs.append(selected_yx)
+                if len(checking_pieces_idxs) != 0:
+                    if piece_id != Pieces.knight.value and Pieces != Pieces.pawn.value:
+                        if np.any(np.abs(opposing_king_yx - selected_yx) >= 2):
+                            if piece_id in obstructing_piece_identities[0]:
+                                vector_ranges = return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=True)
+                            else:
+                                vector_ranges = return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=False)
+                            checking_obstruction_squares = vector_ranges
+                        else:
+                            checking_obstruction_squares = np.array([selected_yx])
 
-                if len(checking_obstruction_squares) != 0:
-                    if shared_obstruction_squares_i := (checking_obstruction_squares[0] == vector_ranges).all(-1).any(-1):
-                        checking_obstruction_squares = checking_obstruction_squares[0][np.argwhere(shared_obstruction_squares_i)[0]]
-                    else:
-                        checking_obstruction_squares = None
 
         return checking_pieces_idxs, checking_obstruction_squares
-        if len(checking_pieces_idxs) != 0:
-            opponent_in_check = True
-            print('check')
-        return opponent_in_check
 
-    def opponent_has_valid_moves(piece_id, initial_yx, selected_yx) -> (bool, bool):
+    def opponent_has_no_valid_moves(piece_id, initial_yx, selected_yx) -> bool:
         nonlocal turn_i_current_opponent
         checking_piece_idxs, checking_obstruction_squares = opponent_is_in_check(piece_id, initial_yx, selected_yx)
-        turn_i_current_opponent = (turn_i_current_opponent[0], turn_i_current_opponent[1])
+        turn_i_current_opponent = (turn_i_current_opponent[1], turn_i_current_opponent[0])
 
-        valid_piece_idxs = np.argwhere(np.logical_and(board_state_pieces_colors_squares[0] != 0, board_state_pieces_colors_squares[0] == turn_i_current_opponent))
-        piece_ids = board_state_pieces_colors_squares[board_state_pieces_colors_squares[0], valid_piece_idxs[:,0], valid_piece_idxs[:,1]]
-        #Oponnent in check
+        piece_moves = np.argwhere(np.logical_and(np.logical_and(board_state_pieces_colors_squares[0] != 0, board_state_pieces_colors_squares[0] != Pieces.king.value + 1),
+                                                 board_state_pieces_colors_squares[1] == turn_i_current_opponent[0]))
+        piece_ids = board_state_pieces_colors_squares[[0], piece_moves[:, 0], piece_moves[:, 1]]
 
-        valid_moves, in_check = False, False
-        potential_king_moves = return_potential_moves(king_positions_yx[turn_i_current_opponent[0]], (Pieces.king.value,))
-        valid_king_moves = np.ones(potential_king_moves.shape[0], dtype=np.uint0)
-        if len(checking_piece_idxs != 2):
+        if len(checking_piece_idxs) != 0:
+            print('check')
+            potential_king_moves = return_potential_moves(king_positions_yx[turn_i_current_opponent[0]], (Pieces.king.value,))
+            valid_king_moves = np.ones(potential_king_moves.shape[0], dtype=np.uint0)
+
 
             for i, single_move in enumerate(potential_king_moves):
                 square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
                 if square_is_not_protected is not None:
                     valid_king_moves[i] = 0
-                if valid_king_moves.any():
-                    valid_move_piece_idx = potential_king_moves[np.argwhere(valid_king_moves)]
-            for piece_id, piece_idx in zip((piece_ids, valid_piece_idxs)):
+            if valid_king_moves.any():
+                king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] = np.array([king_positions_yx[turn_i_current_opponent[0]]])
+                king_in_check_valid_moves[turn_i_current_opponent[0]].append(potential_king_moves[np.argwhere(valid_king_moves).flatten()])
 
-                if np.any(valid_king_moves != 0):
-                    pass
+            if len(checking_piece_idxs) != 2:
+                for piece_id, piece_yx in zip(piece_ids, piece_moves):
+                    potential_moves = return_potential_moves(piece_yx, (piece_id - 1,), obstruction_check=True)
+                    if potential_moves is not None:
+                        valid_moves_in_checking_idxs = (potential_moves[:, None] == checking_obstruction_squares).all(-1).any(-1)
+                        if np.any(valid_moves_in_checking_idxs):
+                            valid_moves = potential_moves[valid_moves_in_checking_idxs]
+                            if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
+                                king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] = np.array([piece_yx], dtype=np.uint8)
+                            else:
+                                king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] = np.vstack((king_in_check_valid_piece_idxs[turn_i_current_opponent[0]], piece_yx))
+                            king_in_check_valid_moves[turn_i_current_opponent[0]].append(valid_moves)
+            if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
+                return True
+            else:
+                return False
+        else:
+            for piece_id, piece_yx in zip(piece_ids, piece_moves):
+                potential_moves = return_potential_moves(piece_yx, (piece_id - 1, ), obstruction_check=True)
+                if potential_moves is not None:
+                    return False
+
+            return True
+
 
     def draw_selected_move(piece_next_yx, output_img_loc: Img):
         nonlocal turn_i_current_opponent
@@ -628,11 +659,7 @@ def main():
                             draw_idxs = np.vstack((draw_idxs, np.array([[piece_initial_yx[0], piece_next_yx[1] + 1],
                                                                         [piece_initial_yx[0], 0]])))
                 rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1] = 0
-                king_positions_yx[turn_i_current_opponent[0]] = piece_initial_yx
-                update_king_obstruction_array(piece_next_yx, king_closest_obstructing_pieces_is[turn_i_current_opponent[0]])
-
-
-
+                king_positions_yx[turn_i_current_opponent[0]] = piece_next_yx
 
             elif piece_id == Pieces.pawn.value:
                 if abs(piece_initial_yx[0] - piece_next_yx[0]) == 2:
@@ -652,34 +679,24 @@ def main():
                             if board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] == 0:
                                 board_state_pieces_colors_squares[0:2, piece_next_yx[0] + 1, piece_next_yx[1]] = (0, 0)
                                 draw_idxs = np.vstack((draw_idxs, (piece_next_yx[0] + 1, piece_next_yx[1])))
+            if piece_id != Pieces.king.value:
+                king_movement_vectors = movement_vectors[Pieces.king.value]
+                for obstruction_array, king_yx in zip(king_closest_obstructing_pieces_is, king_positions_yx):
+                    a = obstruction_array == piece_initial_yx
+                    t = np.all(a, axis = 1)
+                    if np.any(np.all(obstruction_array == piece_initial_yx, axis = 1)):
+                        initial_vector = np.sign(piece_initial_yx - king_yx)
+                        obstruction_i = np.argwhere(np.all(king_movement_vectors == initial_vector, axis = 1)).flatten()
+                        next_obstruction_idx = return_potential_moves(king_yx, (0, ), check_type='obstruction', vector_magnitude_overwrite=((np.array([initial_vector]),), (9, )))
+                        if next_obstruction_idx is not None:
+                            obstruction_array[obstruction_i] = next_obstruction_idx
 
-            obstruction_vector_selected_square, obstruction_vector_starting_square = piece_next_yx - king_positions_yx[turn_i_current_opponent[0]], piece_initial_yx - king_positions_yx[turn_i_current_opponent[0]]
-            obstruction_vector_selected_square_sign, obstruction_vector_starting_square_sign = np.sign(obstruction_vector_selected_square), np.sign(obstruction_vector_starting_square)
-            # Obstruction check, if the selected move is on the same axis as the king, check to see if the piece is the closest obstructing piece
-            # Orthogonal check, x_y axis
-            if not np.all(obstruction_vector_selected_square_sign == obstruction_vector_starting_square):
-                if np.any(np.all(movement_vectors[Pieces.king.value] == obstruction_vector_starting_square, axis=1)):
-                    vector_idx = np.argwhere(np.any(np.all(movement_vectors[Pieces.king.value] == obstruction_vector_starting_square, axis=1)))[0]
-                    potential_y_x_idxs = return_potential_moves(piece_initial_yx, (0,), vector_magnitude_overwrite=((np.array([obstruction_vector_starting_square]),), (9,)), check_type='obstruction')
-                    if potential_y_x_idxs is not None:
-                        king_closest_obstructing_pieces_is[turn_i_current_opponent[0], vector_idx] = potential_y_x_idxs[0]
-                    else:
-                        king_closest_obstructing_pieces_is[turn_i_current_opponent[0], vector_idx] = (8, 8)
+                    selected_piece_vector = piece_next_yx - king_yx
+                    if np.any(selected_piece_vector == 0) or np.all(np.abs(selected_piece_vector) % 2 == 0):
+                        selected_piece_sign = np.sign(selected_piece_vector)
+                        obstruction_i = np.argwhere(np.all(king_movement_vectors == selected_piece_sign, axis = 1)).flatten()
+                        obstruction_array[obstruction_i] = return_potential_moves(king_yx, (0,), check_type='obstruction', vector_magnitude_overwrite=((np.array([selected_piece_sign]),), (9,)))
 
-            orthogonal_obstruction, diagonal_obstruction = np.any(obstruction_vector_selected_square == 0), \
-                                                           np.sum(np.abs(obstruction_vector_selected_square)) % 2 == 0 and np.abs(obstruction_vector_selected_square)[0] == np.abs(obstruction_vector_selected_square)[1]
-
-            if orthogonal_obstruction or diagonal_obstruction:
-                obstruction_vector_i = np.argwhere(np.all(movement_vectors[Pieces.king.value] == obstruction_vector_selected_square_sign, axis=1)).flatten()
-                ref_idx = np.argwhere(obstruction_vector_selected_square != 0).flatten()[0]
-                if obstruction_vector_selected_square[ref_idx] != 1:
-                    vector_ranges_yx = return_vector_ranges(king_positions_yx[turn_i_current_opponent[0]], piece_next_yx, orthogonal_obstruction)
-                    vector_ranges_yx = vector_ranges_yx[np.invert(np.all(vector_ranges_yx == piece_initial_yx, axis=1))]
-                    pieces = board_state_pieces_colors_squares[0, vector_ranges_yx[:, 0], vector_ranges_yx[:, 1]]
-                    if np.all(pieces == 0):
-                        king_closest_obstructing_pieces_is[turn_i_current_opponent[0], obstruction_vector_i] = piece_next_yx
-                else:
-                    king_closest_obstructing_pieces_is[turn_i_current_opponent[0], obstruction_vector_i] = piece_next_yx
 
             board_state_pieces_colors_squares[0:2, piece_next_yx[0], piece_next_yx[1]] = board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]]
             board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]] = (0, 0)
@@ -698,43 +715,29 @@ def main():
                             break
                     piece_id = board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] - 1
 
-            if opponent_is_in_check(piece_id, piece_initial_yx, piece_next_yx):
-                if opponent_has_no_valid_moves():
+            if opponent_has_no_valid_moves(piece_id, piece_initial_yx, piece_next_yx):
+                if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
                     print('checkmate')
-            else:
-                if opponent_has_no_valid_moves():
+                else:
                     print('stalemate')
-
-            output_img_loc.piece_idx_selected, output_img_loc.drawn_moves = None, None
-            en_passant_tracker[turn_i_current_opponent[1]] = 0
-            turn_i_current_opponent = turn_i_current_opponent[1], turn_i_current_opponent[0]
-            cv2.imshow(o_img.window_name, o_img.img)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                cv2.destroyAllWindows()
-            '''if sound_state != 0:
-                playsound(capture_sound)
             else:
-                playsound(move_sound)'''
+                king_in_check_valid_piece_idxs[turn_i_current_opponent[1]] = None
+                king_in_check_valid_moves[turn_i_current_opponent[1]].clear()
+                output_img_loc.piece_idx_selected, output_img_loc.drawn_moves = None, None
+                en_passant_tracker[turn_i_current_opponent[0]] = 0
+                cv2.imshow(o_img.window_name, o_img.img)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    cv2.destroyAllWindows()
+                '''if sound_state != 0:
+                    playsound(capture_sound)
+                else:
+                    playsound(move_sound)'''
 
         elif np.logical_and(board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] != 0,
                             board_state_pieces_colors_squares[1, piece_next_yx[0], piece_next_yx[1]] == turn_i_current_opponent[0]):
             output_img_loc.draw_board(drawn_idxs, board_state_pieces_colors_squares)
             draw_potential_moves(piece_next_yx)
 
-    o_img = Img()
-    turn_i_current_opponent = (white_i, black_i)
-
-    move_count, minimum_theoretical_stalemate_move_count = 0, 10
-    rook_king_rook_has_not_moved, en_passant_tracker = np.zeros((2, 3), dtype=np.uint0), np.zeros((2, 8), dtype=np.uint0)
-    king_in_check_valid_piece_idxs, king_in_check_valid_moves = [[], []], [[], []]
-    king_checking_piece_idxs, king_checking_obstruction_idxs = [[], []], [[], []]
-    king_positions_yx = np.array([[7, 4], [0, 4]], dtype=np.uint8)
-    king_closest_obstructing_pieces_is = 8 * np.ones((2, 9, 2), dtype=np.uint8)
-    obstructing_piece_identities = (np.array([Pieces.queen.value, Pieces.rook.value, Pieces.king.value], dtype=np.uint8) + 1,
-                                    np.array([Pieces.queen.value, Pieces.bishop.value, Pieces.king.value], dtype=np.uint8) + 1,
-                                    np.array([Pieces.knight.value], dtype=np.uint8) + 1)
-    set_starting_board_state()
-    cv2.namedWindow(Img.window_name)
 
     def mouse_handler(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -758,6 +761,7 @@ def main():
                     draw_potential_moves(idx_y_x)
 
     cv2.setMouseCallback('Chess', mouse_handler)
+    set_starting_board_state()
 
     while 1:
         cv2.imshow(o_img.window_name, o_img.img)
