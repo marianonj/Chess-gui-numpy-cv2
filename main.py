@@ -12,10 +12,12 @@ capture_sound, move_sound = dir.piece_capture_sound_dir, dir.piece_moved_sound_d
 class Img:
     total_image_size_yx = (720, 1280)
     label_offsets = .1
+    color_value = 215
 
     grid_square_size_yx = int((total_image_size_yx[0] * (1 - label_offsets)) / 8), int((total_image_size_yx[0] * (1 - label_offsets)) / 8)
     x_label_offset = int(label_offsets * total_image_size_yx[0])
-    icon_size_yx = (grid_square_size_yx[0] * 2 // 9), (grid_square_size_yx[0] * 2 // 9)
+    icon_size_yx = (grid_square_size_yx[0] * 2 // 10), (grid_square_size_yx[0] * 2 // 10)
+    icon_buffer = ((grid_square_size_yx[0] * 2) - icon_size_yx[0] * 8) // 10
     font_face = cv2.FONT_HERSHEY_COMPLEX_SMALL
     text_border_buffer = .4
     max_move_count = 128
@@ -36,14 +38,19 @@ class Img:
         self.img = np.zeros((self.total_image_size_yx[0], self.total_image_size_yx[1], 3), dtype=np.uint8)
         grid_square_templates = np.ones((2, 2, self.grid_square_size_yx[0], self.grid_square_size_yx[1], 3), dtype=np.uint8)
         self.square_color_white = np.array([255, 255, 244], dtype=np.uint8)
-        self.square_color_black = np.array([180, 130, 170], dtype=np.uint8)
+        hsv_color = np.array([[[int((269 / 359) * 179), 51, self.color_value]]], dtype=np.uint8)
+        self.square_color_black = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2BGR).flatten()
 
+        self.static_color_idxs = []
+
+        self.mouse_callback_bboxs, self.mouse_callback_funcs = [], []
         grid_square_templates[0] = grid_square_templates[0] * self.square_color_white
         grid_square_templates[1] = grid_square_templates[1] * self.square_color_black
         for square in grid_square_templates:
             square[1] = square[0] * .35 + self.valid_move_color * .65
         self.grid_square_templates = grid_square_templates
         self.piece_imgs, self.piece_capture_imgs = self.return_img_arrays()
+        self.piece_imgs_color_idxs = np.argwhere(self.piece_imgs == self.square_color_black)
 
         self.promotion_array_piece_idxs = np.array([[Pieces.queen.value, Pieces.rook.value, Pieces.bishop.value, Pieces.knight.value],
                                                     [Pieces.knight.value, Pieces.bishop.value, Pieces.rook.value, Pieces.queen.value]], dtype=np.uint8) + 1
@@ -56,9 +63,18 @@ class Img:
         self.draw_grid_axes()
         self.move_count = 1
         self.move_tracker_display_max_count, self.move_tracker_bbox, self.move_tracker_y_idxs, self.move_tracker_x_idxs, self.scroll_bar_bbox, self.move_tracker_img, self.move_tracker_font_scale_thickness = self.return_move_tracker_idxs()
+
         self.move_tracker_width, self.move_tracker_height = np.diff(self.move_tracker_x_idxs), np.diff(self.move_tracker_y_idxs[1])
         self.draw_move_tracker_onto_img(0)
         self.capture_states = np.zeros((2, 15), dtype=np.uint8)
+        self.current_menu = None
+        self.img_color_idxs, self.img_color_idxs_selected_moves, self.move_tracker_color_idxs = None, None, None
+
+        self.menus = {}
+        self.setting_menu, self.color_wheel = self.return_settings_menu(self.move_tracker_bbox, self.menus)
+        personal_utils.image_show(self.color_wheel)
+        self.previous_board_states = np.zeros((self.max_move_count * 2, 8, 8), dtype=np.uint16)
+        self.sound_on = True
 
     def set_starting_board_state(self, position_array, fisher=False):
         if not fisher:
@@ -100,6 +116,11 @@ class Img:
             text_xy = char_grid_x_y_offset, y_start + char_grid_x_y_offset + text_size[0][1] // 2 + text_size[1]
             cv2.putText(self.img, self.column_text[i], text_xy, self.font_face, font_scale, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), thickness, lineType=cv2.LINE_AA)
 
+        axes_bboxs = (0, self.img.shape[0], 0, self.board_img_bbox[2]), (self.board_img_bbox[1], self.board_img_bbox[0], 0, self.board_img_bbox[3])
+        img_gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        for bbox in axes_bboxs:
+            self.static_color_idxs.append(np.column_stack(np.nonzero(img_gray[bbox[0]:bbox[1], bbox[2]:bbox[3]])) + (bbox[0], bbox[2]))
+
     def return_piece_location_text_grid(self) -> np.ndarray:
         piece_locations = np.zeros((2, 8, 8), dtype=str)
         for row_i, row_text in enumerate(self.row_text):
@@ -112,7 +133,7 @@ class Img:
         thickness, font_scale = 1, 1
         scroll_wheel_size = int(.025 * self.img.shape[0])
         scroll_wheel_buffer = int(.015 * self.img.shape[0])
-        move_tracker_xy_coverage = .55, .85
+        move_tracker_xy_coverage = .65, .75
         move_tracker_x, move_tracker_y = int((self.img.shape[1] - self.board_img_bbox[3]) * move_tracker_xy_coverage[0]), int(self.img.shape[0] * move_tracker_xy_coverage[1])
         move_tracker_x_offset = ((self.img.shape[1] - self.board_img_bbox[3]) - move_tracker_x) // 2
 
@@ -122,9 +143,9 @@ class Img:
         # self.img[move_tracker_bbox[0]:move_tracker_bbox[1], move_tracker_bbox[2]:move_tracker_bbox[3]] = (255, 255, 255)
         # self.img[scroll_wheel_bbox[0]:scroll_wheel_bbox[1], scroll_wheel_bbox[2]:scroll_wheel_bbox[3]] = (255, 0, 0)
 
-        max_number = 'Move'
+        max_turn_count_column_text = 'Move'
         max_notation = 'Qa1xe4#'
-        max_total_text = max_number + max_notation + max_notation
+        max_total_text = max_turn_count_column_text + max_notation + max_notation
         text_buffer = .85
         grid_pixel_thickness = 2
         text_pixels_x = int((move_tracker_bbox[3] - move_tracker_bbox[2]) * text_buffer) - grid_pixel_thickness * 3
@@ -133,9 +154,9 @@ class Img:
             font_scale += .1
             text_width = cv2.getTextSize(max_total_text, self.font_face, font_scale, thickness)[0][0]
         text_size = cv2.getTextSize(max_total_text, self.font_face, font_scale, thickness)
-        text_count = int((((move_tracker_y) // (text_size[0][1] + text_size[1])) * text_buffer))
+        text_count = int(move_tracker_y // (text_size[0][1] + text_size[1]) * text_buffer)
         notation_text_size = cv2.getTextSize(max_notation, self.font_face, font_scale, thickness)
-        turn_count_text_size = cv2.getTextSize(max_number, self.font_face, font_scale, thickness)
+        turn_count_text_size = cv2.getTextSize(max_turn_count_column_text, self.font_face, font_scale, thickness)
         buffer_width = ((move_tracker_bbox[3] - move_tracker_bbox[2]) - (notation_text_size[0][0] * 2 + turn_count_text_size[0][0] + grid_pixel_thickness * 2)) // 6
         buffer_pixels = np.cumsum(np.hstack((0, np.full(5, buffer_width))))
 
@@ -160,10 +181,10 @@ class Img:
         bbox_y[:, 0][1:] += grid_line_cumsum[1:]
 
         final_width, final_height = bbox_x[-1, 1], bbox_y[text_count, 1]
-        bbox_x_offset, bbox_y_offset = (self.img.shape[1] - self.board_img_bbox[3] - final_width) // 2, (move_tracker_y - bbox_y[text_count - 1, 1])
+        bbox_x_offset, bbox_y_offset = (self.img.shape[1] - self.board_img_bbox[3] - final_width) // 2, (self.img.shape[0] - bbox_y[text_count, 1]) // 2
 
         move_tracker_bbox = np.array([self.board_img_bbox[0] + bbox_y_offset, self.board_img_bbox[0] + final_height + bbox_y_offset,
-                                      self.board_img_bbox[3] + bbox_x_offset, self.board_img_bbox[3] + bbox_x_offset + final_width], dtype=np.uint16)
+                                      self.board_img_bbox[3] + bbox_x_offset, self.board_img_bbox[3] + bbox_x_offset + final_width], dtype=np.int16)
         rectangle_border_points = (move_tracker_bbox[2] - grid_pixel_thickness, move_tracker_bbox[0] - grid_pixel_thickness), \
                                   (move_tracker_bbox[3] + grid_pixel_thickness, move_tracker_bbox[1] + grid_pixel_thickness)
         cv2.rectangle(self.img, rectangle_border_points[0], rectangle_border_points[1], (255, 255, 255), grid_pixel_thickness, cv2.LINE_AA)
@@ -184,7 +205,6 @@ class Img:
 
         move_tracker_bbox[0] += bbox_y[0, 1] - bbox_y[0, 1]
         return text_count, move_tracker_bbox, bbox_y, bbox_x, scroll_wheel_bbox, img_tracker, (font_scale, thickness)
-
 
     def draw_board(self, position_array_draw_idxs_y_x, position_array, pre_move=False):
         draw_idxs = self.return_draw_indicies_from_board_indicies(position_array_draw_idxs_y_x)
@@ -309,23 +329,29 @@ class Img:
         self.draw_board(draw_idxs, promotion_pos_array, pre_move=True)
         self.drawn_moves = draw_idxs
 
-    def draw_move_tracker_text(self, current_i, yx_initial, yx_selected, piece, row_identifier=False, column_identifier=False, piece_captured=False, piece_promotion=None):
-        if piece != Pieces.pawn:
-            text = f'{self.piece_abbreviations[piece.name]}'
-            if column_identifier:
-                text = f'{text}{self.piece_location_str_grid[0, yx_initial[0], yx_initial[1]]}'
-            if row_identifier:
-                text = f'{text}{self.piece_location_str_grid[1, yx_initial[0], yx_initial[1]]}'
-            if piece_captured:
-                text = f'{text}x{self.piece_location_str_grid[0, yx_selected[0], yx_selected[1]]}{self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}'
+    def draw_move_tracker_text(self, current_i, yx_initial, yx_selected, piece, row_identifier=False, column_identifier=False, piece_captured=False, piece_promotion=None, castle_text=None, game_state_text=None):
+        if castle_text is None:
+            if piece != Pieces.pawn:
+                text = f'{self.piece_abbreviations[piece.name]}'
+                if column_identifier:
+                    text = f'{text}{self.piece_location_str_grid[0, yx_initial[0], yx_initial[1]]}'
+                if row_identifier:
+                    text = f'{text}{self.piece_location_str_grid[1, yx_initial[0], yx_initial[1]]}'
+                if piece_captured:
+                    text = f'{text}x{self.piece_location_str_grid[0, yx_selected[0], yx_selected[1]]}{self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}'
+                else:
+                    text = f'{text}{self.piece_location_str_grid[0, yx_selected[0], yx_selected[1]]}{self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}'
             else:
-                text = f'{text}{self.piece_location_str_grid[0, yx_selected[0], yx_selected[1]]}{self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}'
+                text = f'{self.piece_location_str_grid[0, yx_selected[0], yx_selected[1]] + self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}'
+                if piece_captured:
+                    text = f'{self.piece_location_str_grid[0, yx_initial[0], yx_initial[1]] + self.piece_location_str_grid[1, yx_initial[0], yx_initial[1]]}x{text}'
+                if piece_promotion:
+                    text = f'{text}{self.piece_abbreviations[piece_promotion.name]}'
         else:
-            text = f'{self.piece_location_str_grid[0, yx_selected[0], yx_selected[1]] + self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}'
-            if piece_captured:
-                text = f'{self.piece_location_str_grid[0, yx_initial[0], yx_initial[1]] + self.piece_location_str_grid[1, yx_selected[0], yx_selected[1]]}x{text}'
-            if piece_promotion:
-                text = f'{text}{self.piece_abbreviations[piece_promotion.name]}'
+            text = castle_text
+
+        if game_state_text:
+            text = f'{text}{game_state_text}'
 
         if current_i == 0:
             color = self.square_color_white
@@ -351,15 +377,110 @@ class Img:
             self.move_count += 1
 
     def draw_move_tracker_onto_img(self, start_i):
-        if self.move_count < self.move_tracker_display_max_count:
+        if self.move_count <= self.move_tracker_display_max_count:
             start_i, end_i = 0, start_i
+        else:
+            start_i, end_i = self.move_count - self.move_tracker_display_max_count, self.move_count
 
         img_range_y = self.move_tracker_y_idxs[start_i + self.move_tracker_display_max_count, 1] - self.move_tracker_y_idxs[start_i, 0]
         self.img[self.move_tracker_bbox[0]:self.move_tracker_bbox[0] + img_range_y, self.move_tracker_bbox[2]:self.move_tracker_bbox[3]] = self.move_tracker_img[self.move_tracker_y_idxs[start_i, 0]: self.move_tracker_y_idxs[start_i + self.move_tracker_display_max_count, 1]]
 
+    def return_button_ranges_and_corresponding_functions(self) -> (np.ndarray, list):
+        button_ranges, button_funcs = [], []
 
+        def set_settings_cog():
+            settings_cog_coverage = .05
+            setting_cog_dim = int(settings_cog_coverage * self.img.shape[0])
+            settings_cog = cv2.resize(cv2.imread(dir.settings_cog_img_dir, cv2.IMREAD_UNCHANGED), (setting_cog_dim, setting_cog_dim))
+            non_zero = np.column_stack((np.nonzero(settings_cog[0:, :, 3])))
+            settings_cog_img = settings_cog[0:, :, 0:3]
+            settings_cog_img[non_zero[:, 0], non_zero[:, 1], 0:3] = self.square_color_black
+            non_zero_relative = non_zero - setting_cog_dim // 2
+            mp_cog_yx = 0 + setting_cog_dim // 2, self.img.shape[1] - setting_cog_dim // 2
 
+            self.img[mp_cog_yx[0] + non_zero_relative[:, 0], mp_cog_yx[1] + non_zero_relative[:, 1]] = settings_cog_img[non_zero[:, 0], non_zero[:, 1]]
+            button_ranges.append(np.array([0, setting_cog_dim, self.img.shape[1] - setting_cog_dim, self.img.shape[1]]))
+            print('b')
+            pass
 
+        set_settings_cog()
+
+        return 0, 0
+
+    def return_settings_menu(self, bbox, menu_dict):
+        settings_template_img = np.zeros((bbox[1] - bbox[0], bbox[3] - bbox[2], 3), dtype=np.uint8)
+        buffer = .85
+        sat_min, sat_range = 55, 200
+        hsv_wheel_size = int(settings_template_img.shape[1] * buffer)
+        x_offset, y_offset = int((1 - buffer) * settings_template_img.shape[1]) // 2, (settings_template_img.shape[0] - hsv_wheel_size) // 8
+        color_wheel_img = np.zeros((hsv_wheel_size, hsv_wheel_size, 3), dtype=np.uint8)
+        cv2.circle(color_wheel_img, (hsv_wheel_size // 2, hsv_wheel_size // 2), (hsv_wheel_size // 2) - 4, (255, 255, 255), -1, lineType=cv2.LINE_AA)
+        hsv_yx = np.column_stack(np.nonzero(cv2.cvtColor(color_wheel_img, cv2.COLOR_BGR2GRAY)))
+        hsv_y_x_idxs = hsv_yx - (hsv_wheel_size // 2, hsv_wheel_size // 2)
+        hsv_values = np.arctan2(hsv_y_x_idxs[:, 0], hsv_y_x_idxs[:, 1]) * 180 / np.pi
+        hsv_values[np.argwhere(hsv_values < 0)] = 180 + np.abs(hsv_values[np.argwhere(hsv_values < 0)] + 180)
+        hsv_values *= (179 / 359)
+        dist = np.linalg.norm(hsv_y_x_idxs - (0, 0), axis=1)
+        dist_saturation_values = (dist / dist.max() * sat_range) + sat_min
+        value_values = np.full_like(dist_saturation_values, self.color_value)
+        hsv_wheel_values = np.column_stack((hsv_values, dist_saturation_values, value_values)).astype(np.uint8)
+        bgr_values = cv2.cvtColor(np.array([hsv_wheel_values]), cv2.COLOR_HSV2BGR)[0]
+        hsv_starting_color = cv2.cvtColor(np.array([[self.square_color_black]]), cv2.COLOR_BGR2HSV).flatten()
+
+        starting_radius = int((hsv_starting_color[1] / (sat_min + sat_range)) * hsv_wheel_size)
+        starting_cursor_xy = int(starting_radius * np.cos((hsv_starting_color[0] / 179) * 360)) + hsv_wheel_size // 2, int(starting_radius * np.sin((hsv_starting_color[0] / 179) * 360)) + hsv_wheel_size // 2
+
+        starting_idx = np.argwhere(np.logical_and(bgr_values[:, 0] == hsv_starting_color[0], bgr_values[:, 1] == hsv_starting_color[1]))
+        starting_cursor_idx = np.argmin(np.sum(np.abs(hsv_wheel_values - self.square_color_black), axis=1))
+        color_wheel_img[hsv_yx[:, 0], hsv_yx[:, 1]] = bgr_values
+
+        current_menu_wheel_img, current_cursor_mp = color_wheel_img.copy(), hsv_yx[starting_cursor_idx]
+
+        hsv_cursor_selector_radius = max(int(hsv_wheel_size * .0125), 1)
+        cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
+        cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (255, 255, 255), 1, lineType=cv2.LINE_AA)
+
+        sound_bbox_length = max(int(hsv_wheel_size * .1), 1)
+        color_wheel_start_yx = settings_template_img.shape[0] - y_offset, x_offset
+        settings_template_img[settings_template_img.shape[0] - y_offset - current_menu_wheel_img.shape[0]:settings_template_img.shape[0] - y_offset, x_offset: x_offset + current_menu_wheel_img.shape[1]] = current_menu_wheel_img
+
+        sound_text_size = cv2.getTextSize('Sound', self.font_face, self.move_tracker_font_scale_thickness[0], self.move_tracker_font_scale_thickness[1])
+        xy_text_offset = (settings_template_img.shape[0] // 2 - sound_text_size[0][1]) // 4, (settings_template_img.shape[1] - sound_text_size[0][0]) // 4
+        xy_checkbox_offset = (settings_template_img.shape[0] // 2 - sound_bbox_length) // 4, (settings_template_img.shape[1] - sound_text_size[0][0]) // 4
+        cv2.putText(settings_template_img, 'Sound On', (0 + xy_text_offset[1], 0 + xy_text_offset[0]), self.font_face, self.move_tracker_font_scale_thickness[0], (255, 255, 255), self.move_tracker_font_scale_thickness[1], cv2.LINE_AA)
+        y_mp_checkbox = xy_text_offset[0] - sound_text_size[1] - sound_bbox_length // 2
+
+        bbox_checkbox = np.array([y_mp_checkbox, y_mp_checkbox + sound_bbox_length, settings_template_img.shape[1] // 2 + xy_checkbox_offset[0], settings_template_img.shape[1] // 2 + xy_checkbox_offset[0] + sound_bbox_length])
+        settings_template_img[bbox_checkbox[0]:bbox_checkbox[1], bbox_checkbox[2]:bbox_checkbox[3]] = self.square_color_black
+        bboxs = np.vstack((np.array([self.move_tracker_bbox[0] + color_wheel_start_yx[0], self.move_tracker_bbox[0] + color_wheel_start_yx[0] + settings_template_img.shape[0],
+                                           self.move_tracker_bbox[2] + color_wheel_start_yx[1], self.move_tracker_bbox[2] + color_wheel_start_yx[1] + settings_template_img.shape[1]]),
+                                 np.array([self.move_tracker_bbox[0] + bbox_checkbox[0], self.move_tracker_bbox[0] + bbox_checkbox[1],
+                                           self.move_tracker_bbox[2] + bbox_checkbox[2], self.move_tracker_bbox[2] + bbox_checkbox[3]])))
+
+        menu_dict['settings'] = {'funcs': [self.set_accent_color, self.set_sound_setting], 'bboxs': bboxs}
+        return settings_template_img, color_wheel_img
+
+    def set_accent_color(self, x, y):
+        pass
+
+    def set_sound_setting(self):
+        pass
+
+    def open_settings_menu(self):
+        t = self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]]
+        personal_utils.image_show(self.img)
+        self.img_color_idxs = np.column_stack(np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.square_color_black, axis=-1))) + (self.board_img_bbox[0], self.board_img_bbox[2])
+        self.move_tracker_color_idxs = np.column_stack(np.argwhere(np.all(self.move_tracker_color_idxs[0:self.move_tracker_y_idxs[self.move_count], self.move_tracker_x_idxs[-1, 0]:, self.move_tracker_x_idxs[-1, 1]] == self.square_color_black, axis=-1))) + (0, self.move_tracker_x_idxs[-1, 0])
+        pass
+
+    def close_settings_menu(self):
+        pass
+
+    def open_new_game_menu(self):
+        pass
+
+    def close_new_game_menu(self):
+        pass
 
 
 white_i, black_i = 0, 1
@@ -715,7 +836,7 @@ def main():
             king_obstruction_array[np.argwhere(np.invert(valid_obstruction_vector_idxs)).flatten()] = (8, 8)
 
     def opponent_is_in_check(piece_id, selected_yx, checking_piece_yx, checking_piece_vector) -> (list, list):
-        checking_pieces_idxs, checking_obstruction_squares = [], []
+        checking_pieces_idxs, checking_squares = [], []
         opposing_king_yx = king_positions_yx[turn_i_current_opponent[1]]
 
         # Checks for a check caused by the piece's movement clearing an attack to the king
@@ -726,11 +847,11 @@ def main():
                     if checking_piece_id in obstructing_piece_identities[0]:
                         checking_pieces_idxs.append(checking_piece_yx)
                         if np.any(np.abs(checking_piece_yx - opposing_king_yx) >= 2):
-                            checking_obstruction_squares.append(return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=True))
+                            checking_squares.append(return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=True))
                 elif checking_piece_id in obstructing_piece_identities[1]:
                     checking_pieces_idxs.append(checking_piece_yx)
                     if np.any(np.abs(checking_piece_yx - opposing_king_yx) >= 2):
-                        checking_obstruction_squares.append(return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=False))
+                        checking_squares.append(return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=False))
 
         # Checks for a check caused by the actual piece's attack vector
         check_moves = return_potential_moves(selected_yx, (piece_id,))
@@ -740,19 +861,21 @@ def main():
                 if len(checking_pieces_idxs) != 0:
                     if piece_id != Pieces.knight.value and Pieces != Pieces.pawn.value:
                         if np.any(np.abs(opposing_king_yx - selected_yx) >= 2):
-                            if piece_id in obstructing_piece_identities[0]:
+                            if selected_yx[0] - opposing_king_yx[0] == 0 or selected_yx[1] - opposing_king_yx[1] == 0:
                                 vector_ranges = return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=True)
                             else:
                                 vector_ranges = return_vector_ranges(opposing_king_yx, selected_yx, orthogonal=False)
-                            checking_obstruction_squares = vector_ranges
+                            checking_squares = vector_ranges
                         else:
-                            checking_obstruction_squares = np.array([selected_yx])
+                            checking_squares = np.array([selected_yx])
+                    else:
+                        checking_squares = np.array([selected_yx])
 
-        return checking_pieces_idxs, checking_obstruction_squares
+        return checking_pieces_idxs, checking_squares
 
     def check_for_valid_moves(piece_id, selected_yx, checking_piece_yx, checking_piece_vector) -> (bool, bool):
         nonlocal turn_i_current_opponent
-        in_check, valid_moves = False, True
+        in_check, no_valid_moves = False, False
         checking_piece_idxs, checking_obstruction_squares = opponent_is_in_check(piece_id, selected_yx, checking_piece_yx, checking_piece_vector)
         turn_i_current_opponent = (turn_i_current_opponent[1], turn_i_current_opponent[0])
 
@@ -764,15 +887,16 @@ def main():
             in_check = True
             print('check')
             potential_king_moves = return_potential_moves(king_positions_yx[turn_i_current_opponent[0]], (Pieces.king.value,))
-            valid_king_moves = np.ones(potential_king_moves.shape[0], dtype=np.uint0)
+            if potential_king_moves is not None:
+                valid_king_moves = np.ones(potential_king_moves.shape[0], dtype=np.uint0)
 
-            for i, single_move in enumerate(potential_king_moves):
-                square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
-                if square_is_not_protected is not None:
-                    valid_king_moves[i] = 0
-            if valid_king_moves.any():
-                king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] = np.array([king_positions_yx[turn_i_current_opponent[0]]])
-                king_in_check_valid_moves[turn_i_current_opponent[0]].append(potential_king_moves[np.argwhere(valid_king_moves).flatten()])
+                for i, single_move in enumerate(potential_king_moves):
+                    square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                    if square_is_not_protected is not None:
+                        valid_king_moves[i] = 0
+                if valid_king_moves.any():
+                    king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] = np.array([king_positions_yx[turn_i_current_opponent[0]]])
+                    king_in_check_valid_moves[turn_i_current_opponent[0]].append(potential_king_moves[np.argwhere(valid_king_moves).flatten()])
 
             if len(checking_piece_idxs) != 2:
                 for piece_id, piece_yx in zip(piece_ids, piece_moves):
@@ -786,27 +910,27 @@ def main():
                             else:
                                 king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] = np.vstack((king_in_check_valid_piece_idxs[turn_i_current_opponent[0]], piece_yx))
                             king_in_check_valid_moves[turn_i_current_opponent[0]].append(valid_moves)
-                            if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
-                                valid_moves = False
+            if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
+                no_valid_moves = True
         else:
             for piece_id, piece_yx in zip(piece_ids, piece_moves):
                 potential_moves = return_potential_moves(piece_yx, (piece_id - 1,), obstruction_check=True)
                 if potential_moves is not None:
-                    valid_moves = True
+                    no_valid_moves = False
                 break
 
-        return in_check, valid_moves
+        return in_check, no_valid_moves
 
     def draw_selected_move(piece_next_yx, output_img_loc: Img):
         nonlocal turn_i_current_opponent
-
+        turn_i = turn_i_current_opponent[0]
         piece_initial_yx, drawn_idxs = output_img_loc.piece_idx_selected, output_img_loc.drawn_moves
         drawn_idx_compare = np.all(drawn_idxs == piece_next_yx, axis=1)
         in_drawn_idxs = np.argwhere(drawn_idx_compare).flatten()
         if in_drawn_idxs.shape[0] != 0:
             draw_idxs = np.vstack((piece_initial_yx, piece_next_yx))
             piece_id = board_state_pieces_colors_squares[0, piece_initial_yx[0], piece_initial_yx[1]] - 1
-
+            piece_draw, piece_promoted, captured_piece, castle_text, game_state_text = Pieces(piece_id), None, False, None, None
             if piece_id == Pieces.rook.value:
                 if piece_initial_yx[1] == 7:
                     rook_king_rook_has_not_moved[turn_i_current_opponent[0], 2] = 0
@@ -821,11 +945,13 @@ def main():
                             board_state_pieces_colors_squares[0:2, piece_initial_yx[0], 7] = 0, 0
                             draw_idxs = np.vstack((draw_idxs, np.array([[piece_initial_yx[0], piece_next_yx[1] - 1],
                                                                         [piece_initial_yx[0], 7]])))
+                            castle_text = '0-0-0'
                         else:
                             board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_next_yx[1] + 1] = Pieces.rook.value + 1, turn_i_current_opponent[0]
                             board_state_pieces_colors_squares[0:2, piece_initial_yx[0], 0] = 0
                             draw_idxs = np.vstack((draw_idxs, np.array([[piece_initial_yx[0], piece_next_yx[1] + 1],
                                                                         [piece_initial_yx[0], 0]])))
+                            castle_text = '0-0'
                 rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1] = 0
                 king_positions_yx[turn_i_current_opponent[0]] = piece_next_yx
 
@@ -842,21 +968,20 @@ def main():
                             if board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] == 0:
                                 board_state_pieces_colors_squares[0:2, piece_next_yx[0] - 1, piece_next_yx[1]] = (0, 0)
                                 draw_idxs = np.vstack((draw_idxs, (piece_next_yx[0] - 1, piece_next_yx[1])))
+                                captured_piece = True
                         # White Capture
                         else:
                             if board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] == 0:
                                 board_state_pieces_colors_squares[0:2, piece_next_yx[0] + 1, piece_next_yx[1]] = (0, 0)
                                 draw_idxs = np.vstack((draw_idxs, (piece_next_yx[0] + 1, piece_next_yx[1])))
+                                captured_piece = True
 
-            piece_draw, piece_promoted, captured_piece = Pieces(piece_id), None, None
             if board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] != 0:
-                captured_piece = Pieces(board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] - 1)
-
+                captured_piece = True
 
             board_state_pieces_colors_squares[0:2, piece_next_yx[0], piece_next_yx[1]] = board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]]
             board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]] = (0, 0)
             potential_checking_piece_yx, potential_checking_piece_vector = None, None
-
 
             if piece_id != Pieces.king.value:
                 king_movement_vectors = movement_vectors[Pieces.king.value]
@@ -866,9 +991,6 @@ def main():
                         obstruction_i = np.argwhere(np.all(king_movement_vectors == initial_vector, axis=1)).flatten()
                         next_obstruction_idx = return_potential_moves(king_yx, (0,), check_type='obstruction', vector_magnitude_overwrite=((np.array([initial_vector]),), (9,)))
                         if next_obstruction_idx is not None:
-                            if i == turn_i_current_opponent[1]:
-                                if board_state_pieces_colors_squares[1, next_obstruction_idx[0, 1], next_obstruction_idx[0, 1]] == turn_i_current_opponent[0]:
-                                    potential_checking_piece_yx, potential_checking_piece_vector = next_obstruction_idx[0], initial_vector
                             obstruction_array[obstruction_i] = next_obstruction_idx
 
                     selected_piece_vector = piece_next_yx - king_yx
@@ -894,6 +1016,18 @@ def main():
                     piece_id = board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] - 1
                     piece_promoted = Pieces(piece_id)
 
+            in_check, opponent_has_no_valid_moves = check_for_valid_moves(piece_id, piece_next_yx, potential_checking_piece_yx, potential_checking_piece_vector)
+            if opponent_has_no_valid_moves:
+                if in_check:
+                    game_state_text = '++'
+                    print('checkmate')
+                else:
+                    game_state_text = '='
+                    print('stalemate')
+            else:
+                if in_check:
+                    game_state_text = '+'
+
             potential_ambiguous_moves = return_potential_moves(piece_next_yx, (piece_draw.value,), check_type='moves', )
             if potential_ambiguous_moves is not None:
                 color_ids = board_state_pieces_colors_squares[0:2, potential_ambiguous_moves[:, 0], potential_ambiguous_moves[:, 1]]
@@ -902,37 +1036,27 @@ def main():
                     same_pieces = potential_ambiguous_moves[same_piece_i]
                     if same_pieces.shape[0] == 1:
                         if same_pieces[0, 0] == piece_initial_yx[0, 0]:
-                            o_img.draw_move_tracker_text(turn_i_current_opponent[0], piece_initial_yx, piece_next_yx, piece_draw, row_identifier=True, piece_captured=captured_piece, piece_promotion=piece_promoted)
+                            o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
                         else:
-                            o_img.draw_move_tracker_text(turn_i_current_opponent[0], piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, piece_captured=captured_piece, piece_promotion=piece_promoted)
+                            o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
                     else:
-                        o_img.draw_move_tracker_text(turn_i_current_opponent[0], piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, row_identifier=True, piece_captured=captured_piece, piece_promotion=piece_promoted)
+                        o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
                 else:
-                    o_img.draw_move_tracker_text(turn_i_current_opponent[0], piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted)
+                    o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=game_state_text)
             else:
-                o_img.draw_move_tracker_text(turn_i_current_opponent[0], piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted)
+                o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=castle_text)
 
-
-
-            in_check, opponent_has_no_valid_moves = check_for_valid_moves(piece_id, piece_next_yx, potential_checking_piece_yx, potential_checking_piece_vector)
-            if in_check:
-                if opponent_is_in_check:
-                    print('checkmate')
-                else:
-                    print('stalemate')
-
+            king_in_check_valid_piece_idxs[turn_i_current_opponent[1]] = None
+            king_in_check_valid_moves[turn_i_current_opponent[1]].clear()
+            output_img_loc.piece_idx_selected, output_img_loc.drawn_moves = None, None
+            en_passant_tracker[turn_i_current_opponent[0]] = 0
+            cv2.imshow(o_img.window_name, o_img.img)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                cv2.destroyAllWindows()
+            '''if sound_state != 0:
+                playsound(capture_sound)
             else:
-                king_in_check_valid_piece_idxs[turn_i_current_opponent[1]] = None
-                king_in_check_valid_moves[turn_i_current_opponent[1]].clear()
-                output_img_loc.piece_idx_selected, output_img_loc.drawn_moves = None, None
-                en_passant_tracker[turn_i_current_opponent[0]] = 0
-                cv2.imshow(o_img.window_name, o_img.img)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    cv2.destroyAllWindows()
-                '''if sound_state != 0:
-                    playsound(capture_sound)
-                else:
-                    playsound(move_sound)'''
+                playsound(move_sound)'''
 
 
 
