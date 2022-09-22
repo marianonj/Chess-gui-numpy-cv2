@@ -399,7 +399,7 @@ class Img:
             settings_cog_coverage = .05
             setting_cog_dim = int(settings_cog_coverage * self.img.shape[0])
             edge_buffer = int(.2 * setting_cog_dim)
-            settings_cog = cv2.resize(cv2.imread(dir.settings_cog_img_dir, cv2.IMREAD_UNCHANGED), (setting_cog_dim, setting_cog_dim))
+            settings_cog = cv2.resize(cv2.imread(dir.settings_cog_img, cv2.IMREAD_UNCHANGED), (setting_cog_dim, setting_cog_dim))
             non_zero = np.column_stack((np.nonzero(settings_cog[0:, :, 3])))
             settings_cog_img = settings_cog[0:, :, 0:3]
             settings_cog_img[non_zero[:, 0], non_zero[:, 1], 0:3] = self.square_color_black
@@ -503,7 +503,6 @@ class Img:
         else:
             self.current_menu = 'notation'
             self.draw_move_tracker_onto_img(self.move_count)
-
 
     def set_accent_color(self):
         bbox_draw = self.menus['settings']['bboxs'][0]
