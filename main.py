@@ -3,8 +3,10 @@
 import numpy as np
 from enum import Enum, auto
 import cv2, dir, personal_utils
+import vlc
 from playsound import playsound
 from typing import Tuple
+
 
 
 
@@ -778,7 +780,8 @@ def main():
         for i in (white_i, black_i):
             update_king_obstruction_array(king_positions_yx[i], king_closest_obstructing_pieces_is[i])
             print('b')
-        playsound(dir.start_sound)
+        if o_img.sound_is_on:
+            vlc.MediaPlayer(dir.start_sound).play()
 
     def return_vector_ranges(start_yx, end_yx, orthogonal):
         if orthogonal:
@@ -1208,10 +1211,12 @@ def main():
             cv2.imshow(o_img.window_name, o_img.img)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 cv2.destroyAllWindows()
-            '''if sound_state != 0:
-                playsound(capture_sound)
-            else:
-                playsound(move_sound)'''
+            if o_img.sound_is_on:
+                if captured_piece:
+                    vlc.MediaPlayer(dir.capture_sound).play()
+                else:
+                    vlc.MediaPlayer(dir.move_sound).play()
+
 
 
 

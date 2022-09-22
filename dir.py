@@ -1,8 +1,13 @@
-img_dir = f'imgs'
+import os
+path = 'C:/Users/nicos/PycharmProjects/chessinaday'
+
+img_dir = f'{path}/imgs'
 chess_pieces_img = f'{img_dir}/chess_pieces.png'
 settings_cog_img =f'{img_dir}/settings_cog.png'
 
-sound_dir = f'sounds'
-start_sound = f'{sound_dir}/piece_capture.wav'
+sound_dir = f'{path}/sounds'
+start_sound = f'{sound_dir}/war_horn.wav'
 move_sound = f'{sound_dir}/piece_moved.wav'
 victory_sound = f'{sound_dir}/victory.wav'
+capture_sound = f'{sound_dir}/piece_capture.wav'
+print('b')
