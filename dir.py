@@ -1,5 +1,3 @@
-chess_pieces_dir = 'chess_pieces.png'
-piece_moved_sound_dir = f'C:/Users/nicos/PycharmProjects/chessinaday/piece_moved.wav'
-piece_capture_sound_dir = f'C:/Users/nicos/PycharmProjects/chessinaday/piece_capture.wav'
-settings_cog_img_dir = 'imgs/settings_cog.png'
-t = f'{sounds}'
+a = sounds
+chess_pieces_img = f'{imgs}/chess_pieces.png'
+settings_cog_img =f'{imgs}/settings_cog.png'
