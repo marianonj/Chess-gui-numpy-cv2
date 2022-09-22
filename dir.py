@@ -1,3 +1,5 @@
-a = sounds
 chess_pieces_img = f'{imgs}/chess_pieces.png'
 settings_cog_img =f'{imgs}/settings_cog.png'
+start_sound = f'{sounds}/piece_capture.wav'
+move_sound = f'{sounds}/piece_moved.wav'
+victory_sound = f'{sounds}/victory.wav'

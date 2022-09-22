@@ -6,7 +6,6 @@ import cv2, dir, personal_utils
 from playsound import playsound
 from typing import Tuple
 
-capture_sound, move_sound = dir.piece_capture_sound_dir, dir.piece_moved_sound_dir
 
 
 class Img:
@@ -239,7 +238,8 @@ class Img:
 
     def return_img_arrays(self):
         img_order = ('king', 'queen', 'bishop', 'knight', 'rook', 'pawn')
-        img = cv2.imread(dir.chess_pieces_dir, cv2.IMREAD_UNCHANGED)
+        t = dir.chess_pieces_img
+        img = cv2.imread(dir.chess_pieces_img, cv2.IMREAD_UNCHANGED)
         img_white = img[0:img.shape[0] // 2]
         img_black = img[img.shape[0] // 2:]
         buffer_percentage = 1 - .25
@@ -779,6 +779,7 @@ def main():
         for i in (white_i, black_i):
             update_king_obstruction_array(king_positions_yx[i], king_closest_obstructing_pieces_is[i])
             print('b')
+        playsound(dir.start_sound)
 
     def return_vector_ranges(start_yx, end_yx, orthogonal):
         if orthogonal:
