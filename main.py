@@ -21,6 +21,7 @@ class Img:
     font_face = cv2.FONT_HERSHEY_COMPLEX_SMALL
     text_border_buffer = .4
     max_move_count = 128
+    checkbox_checked_fill_percentage = .5
 
     ui_color = np.array([60, 60, 60], dtype=np.uint8)
     window_name = 'Chess'
@@ -31,7 +32,10 @@ class Img:
                            'queen': 'Q',
                            'king': 'K', }
 
+    border_thickness = 2
+
     def __init__(self):
+        self.menus = {}
         self.valid_move_color = np.array([0, 0, 255], dtype=np.uint8)
         self.hover_color = np.array([0, 255, 255], dtype=np.uint8)
         self.board_img_bbox = np.array([0, self.grid_square_size_yx[0] * 8, self.x_label_offset, self.x_label_offset + self.grid_square_size_yx[1] * 8])
@@ -40,9 +44,7 @@ class Img:
         self.square_color_white = np.array([255, 255, 244], dtype=np.uint8)
         hsv_color = np.array([[[int((269 / 359) * 179), 51, self.color_value]]], dtype=np.uint8)
         self.square_color_black = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2BGR).flatten()
-
-        self.static_color_idxs = []
-
+        self.valid_move_color = np.full(3, 255) - self.square_color_black
         self.mouse_callback_bboxs, self.mouse_callback_funcs = [], []
         grid_square_templates[0] = grid_square_templates[0] * self.square_color_white
         grid_square_templates[1] = grid_square_templates[1] * self.square_color_black
@@ -50,7 +52,10 @@ class Img:
             square[1] = square[0] * .35 + self.valid_move_color * .65
         self.grid_square_templates = grid_square_templates
         self.piece_imgs, self.piece_capture_imgs = self.return_img_arrays()
-        self.piece_imgs_color_idxs = np.argwhere(self.piece_imgs == self.square_color_black)
+        self.piece_imgs_black_square_idxs, self.piece_imgs_drawn_move_idxs_w, self.piece_imgs_drawn_move_idxs_b = np.column_stack((np.argwhere(np.all(self.piece_imgs == self.square_color_black, axis=-1)))), \
+                                                                                                                  np.column_stack((np.argwhere(np.all(self.piece_imgs == self.grid_square_templates[0, 1], axis=-1)))), \
+                                                                                                                  np.column_stack((np.argwhere(np.all(self.piece_imgs == self.grid_square_templates[1, 1], axis=-1))))
+
 
         self.promotion_array_piece_idxs = np.array([[Pieces.queen.value, Pieces.rook.value, Pieces.bishop.value, Pieces.knight.value],
                                                     [Pieces.knight.value, Pieces.bishop.value, Pieces.rook.value, Pieces.queen.value]], dtype=np.uint8) + 1
@@ -59,22 +64,26 @@ class Img:
         self.promotion_ui_bbox_yx = None
         self.row_text, self.column_text = 'abcdefgh', '87654321'
         self.piece_location_str_grid = self.return_piece_location_text_grid()
-        t = self.piece_location_str_grid[0, 0, 0] + self.piece_location_str_grid[1, 0, 0]
-        self.draw_grid_axes()
+        self.axes_color_idxs = self.draw_grid_axes()
         self.move_count = 1
-        self.move_tracker_display_max_count, self.move_tracker_bbox, self.move_tracker_y_idxs, self.move_tracker_x_idxs, self.scroll_bar_bbox, self.move_tracker_img, self.move_tracker_font_scale_thickness = self.return_move_tracker_idxs()
+
+        # Defined in below function
+        self.font_scale_thickness = None
+        self.move_tracker_display_max_count, self.menu_bbox, self.move_tracker_y_idxs, self.move_tracker_x_idxs, self.scroll_bar_bbox, = self.return_notation_idxs(self.menus)
+        self.color_wheel, self.color_wheel_cursor_radius, self.current_color_cursor_location_yx = self.return_settings_menu(self.menu_bbox, self.menus)
+        self.return_new_game_menu(self.menu_bbox, self.menus)
 
         self.move_tracker_width, self.move_tracker_height = np.diff(self.move_tracker_x_idxs), np.diff(self.move_tracker_y_idxs[1])
         self.draw_move_tracker_onto_img(0)
         self.capture_states = np.zeros((2, 15), dtype=np.uint8)
         self.current_menu = None
-        self.img_color_idxs, self.img_color_idxs_selected_moves, self.move_tracker_color_idxs = None, None, None
+        self.board_color_idxs, self.img_color_idxs_black, self.board_color_idxs_moves_black, self.board_color_idxs_moves_black = None, None, None, None
 
-        self.menus = {}
-        self.setting_menu, self.color_wheel = self.return_settings_menu(self.move_tracker_bbox, self.menus)
-        personal_utils.image_show(self.color_wheel)
+        self.button_ranges, self.button_funcs, self.button_imgs = self.return_menu_buttons()
         self.previous_board_states = np.zeros((self.max_move_count * 2, 8, 8), dtype=np.uint16)
-        self.sound_on = True
+        self.sound_is_on = True
+        self.current_game_state, self.current_menu= False, 'notation'
+        self.mouse_xy = None
 
     def set_starting_board_state(self, position_array, fisher=False):
         if not fisher:
@@ -116,10 +125,12 @@ class Img:
             text_xy = char_grid_x_y_offset, y_start + char_grid_x_y_offset + text_size[0][1] // 2 + text_size[1]
             cv2.putText(self.img, self.column_text[i], text_xy, self.font_face, font_scale, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), thickness, lineType=cv2.LINE_AA)
 
+
         axes_bboxs = (0, self.img.shape[0], 0, self.board_img_bbox[2]), (self.board_img_bbox[1], self.board_img_bbox[0], 0, self.board_img_bbox[3])
         img_gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
-        for bbox in axes_bboxs:
-            self.static_color_idxs.append(np.column_stack(np.nonzero(img_gray[bbox[0]:bbox[1], bbox[2]:bbox[3]])) + (bbox[0], bbox[2]))
+        text_color_idxs = np.column_stack(np.nonzero(img_gray))
+        print('b')
+        return text_color_idxs
 
     def return_piece_location_text_grid(self) -> np.ndarray:
         piece_locations = np.zeros((2, 8, 8), dtype=str)
@@ -129,7 +140,7 @@ class Img:
                 piece_locations[1, column_i, row_i] = column_text
         return piece_locations
 
-    def return_move_tracker_idxs(self):
+    def return_notation_idxs(self, menu_dict):
         thickness, font_scale = 1, 1
         scroll_wheel_size = int(.025 * self.img.shape[0])
         scroll_wheel_buffer = int(.015 * self.img.shape[0])
@@ -140,24 +151,26 @@ class Img:
         move_tracker_bbox = np.array([self.board_img_bbox[0] + self.grid_square_size_yx[0], self.board_img_bbox[1],
                                       self.board_img_bbox[3] + move_tracker_x_offset, self.board_img_bbox[3] + move_tracker_x_offset + move_tracker_x], dtype=np.uint16)
         scroll_wheel_bbox = np.array([move_tracker_bbox[0], move_tracker_bbox[1], move_tracker_bbox[3] + scroll_wheel_buffer, move_tracker_bbox[3] + scroll_wheel_buffer + scroll_wheel_size], dtype=np.uint16)
-        # self.img[move_tracker_bbox[0]:move_tracker_bbox[1], move_tracker_bbox[2]:move_tracker_bbox[3]] = (255, 255, 255)
+        # self.img[menu_bbox[0]:menu_bbox[1], menu_bbox[2]:menu_bbox[3]] = (255, 255, 255)
         # self.img[scroll_wheel_bbox[0]:scroll_wheel_bbox[1], scroll_wheel_bbox[2]:scroll_wheel_bbox[3]] = (255, 0, 0)
 
         max_turn_count_column_text = 'Move'
         max_notation = 'Qa1xe4#'
         max_total_text = max_turn_count_column_text + max_notation + max_notation
         text_buffer = .85
-        grid_pixel_thickness = 2
-        text_pixels_x = int((move_tracker_bbox[3] - move_tracker_bbox[2]) * text_buffer) - grid_pixel_thickness * 3
+        text_pixels_x = int((move_tracker_bbox[3] - move_tracker_bbox[2]) * text_buffer) - self.border_thickness * 3
         text_width = 0
         while text_pixels_x >= text_width:
             font_scale += .1
             text_width = cv2.getTextSize(max_total_text, self.font_face, font_scale, thickness)[0][0]
+
+        self.font_scale_thickness = font_scale, thickness
+
         text_size = cv2.getTextSize(max_total_text, self.font_face, font_scale, thickness)
         text_count = int(move_tracker_y // (text_size[0][1] + text_size[1]) * text_buffer)
         notation_text_size = cv2.getTextSize(max_notation, self.font_face, font_scale, thickness)
         turn_count_text_size = cv2.getTextSize(max_turn_count_column_text, self.font_face, font_scale, thickness)
-        buffer_width = ((move_tracker_bbox[3] - move_tracker_bbox[2]) - (notation_text_size[0][0] * 2 + turn_count_text_size[0][0] + grid_pixel_thickness * 2)) // 6
+        buffer_width = ((move_tracker_bbox[3] - move_tracker_bbox[2]) - (notation_text_size[0][0] * 2 + turn_count_text_size[0][0] + self.border_thickness * 2)) // 6
         buffer_pixels = np.cumsum(np.hstack((0, np.full(5, buffer_width))))
 
         bbox_x = np.array([[0, turn_count_text_size[0][0]],
@@ -170,7 +183,7 @@ class Img:
         text_height = text_size[0][1] + text_size[1]
 
         text_height_cumsum = np.hstack((0, np.cumsum(np.full(self.max_move_count - 1, text_height))))
-        grid_line_cumsum = np.cumsum(np.full(self.max_move_count - 1, grid_pixel_thickness))
+        grid_line_cumsum = np.cumsum(np.full(self.max_move_count - 1, self.border_thickness))
         buffer_height = ((move_tracker_bbox[1] - move_tracker_bbox[0]) - (text_height_cumsum[text_count] + grid_line_cumsum[text_count])) // text_count
         buffer_height_cumsum = np.cumsum(np.full(self.max_move_count, buffer_height))
 
@@ -185,17 +198,15 @@ class Img:
 
         move_tracker_bbox = np.array([self.board_img_bbox[0] + bbox_y_offset, self.board_img_bbox[0] + final_height + bbox_y_offset,
                                       self.board_img_bbox[3] + bbox_x_offset, self.board_img_bbox[3] + bbox_x_offset + final_width], dtype=np.int16)
-        rectangle_border_points = (move_tracker_bbox[2] - grid_pixel_thickness, move_tracker_bbox[0] - grid_pixel_thickness), \
-                                  (move_tracker_bbox[3] + grid_pixel_thickness, move_tracker_bbox[1] + grid_pixel_thickness)
-        cv2.rectangle(self.img, rectangle_border_points[0], rectangle_border_points[1], (255, 255, 255), grid_pixel_thickness, cv2.LINE_AA)
+        self.draw_border(self.img, move_tracker_bbox)
         img_tracker = np.zeros((bbox_y[-1, 1] - bbox_y[0, 0], bbox_x[-1, 1], 3), dtype=np.uint8)
 
         for x_idx in range(bbox_x.shape[0] - 1):
             img_tracker[:, bbox_x[x_idx, 1]:bbox_x[x_idx + 1, 0]] = (255, 255, 255)
         for y_idx in range(bbox_y.shape[0] - 1):
             bbox_mp_y = (bbox_y[y_idx, 1] + bbox_y[y_idx + 1, 0]) // 2
-            start_y = bbox_mp_y - (grid_pixel_thickness // 2)
-            img_tracker[start_y:start_y + grid_pixel_thickness] = (255, 255, 255)
+            start_y = bbox_mp_y - (self.border_thickness // 2)
+            img_tracker[start_y:start_y + self.border_thickness] = (255, 255, 255)
 
         for text, color, bbox in zip(('Move', 'White', 'Black'), (self.square_color_white, self.square_color_white, self.square_color_black), bbox_x):
             text_size = cv2.getTextSize(text, self.font_face, font_scale, thickness)
@@ -204,7 +215,8 @@ class Img:
             cv2.putText(img_tracker, text, mp, self.font_face, font_scale, (int(color[0]), int(color[1]), int(color[2])), thickness, cv2.LINE_AA)
 
         move_tracker_bbox[0] += bbox_y[0, 1] - bbox_y[0, 1]
-        return text_count, move_tracker_bbox, bbox_y, bbox_x, scroll_wheel_bbox, img_tracker, (font_scale, thickness)
+        menu_dict['notation'] = {'funcs': (self.return_to_previous_game_state()), 'img': img_tracker}
+        return text_count, move_tracker_bbox, bbox_y, bbox_x, scroll_wheel_bbox
 
     def draw_board(self, position_array_draw_idxs_y_x, position_array, pre_move=False):
         draw_idxs = self.return_draw_indicies_from_board_indicies(position_array_draw_idxs_y_x)
@@ -295,12 +307,6 @@ class Img:
 
         return piece_imgs, capture_imgs
 
-    def click_is_on_board(self, mouse_x, mouse_y):
-        if self.board_img_bbox[2] < mouse_x < self.board_img_bbox[3] and self.board_img_bbox[0] < mouse_y < self.board_img_bbox[1]:
-            return True
-        else:
-            return False
-
     def return_draw_indicies_from_board_indicies(self, board_indicies_y_x):
         return np.column_stack((board_indicies_y_x[:, 0] * Img.grid_square_size_yx[0],
                                 (board_indicies_y_x[:, 0] + 1) * Img.grid_square_size_yx[0],
@@ -358,19 +364,19 @@ class Img:
         else:
             color = self.square_color_black
 
-        text_size = cv2.getTextSize(text, self.font_face, self.move_tracker_font_scale_thickness[0], self.move_tracker_font_scale_thickness[1])
+        text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
         x_y_offset = (self.move_tracker_width[current_i + 1, 0] - text_size[0][0]) // 2, (self.move_tracker_height[0] - text_size[0][1]) // 2
         mp = int(self.move_tracker_x_idxs[current_i + 1, 0] + x_y_offset[0]), int(self.move_tracker_y_idxs[self.move_count, 0] + x_y_offset[1] + text_size[0][1])
-        cv2.putText(self.move_tracker_img, text, mp, self.font_face,
-                    self.move_tracker_font_scale_thickness[0], (int(color[0]), int(color[1]), int(color[2])), self.move_tracker_font_scale_thickness[1], lineType=cv2.LINE_AA)
+        cv2.putText(self.menus['notation']['img'], text, mp, self.font_face,
+                    self.font_scale_thickness[0], (int(color[0]), int(color[1]), int(color[2])), self.font_scale_thickness[1], lineType=cv2.LINE_AA)
 
         if current_i == 0:
             text = f'{self.move_count}'
-            text_size = cv2.getTextSize(text, self.font_face, self.move_tracker_font_scale_thickness[0], self.move_tracker_font_scale_thickness[1])
+            text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
             x_y_offset = (self.move_tracker_width[0, 0] - text_size[0][0]) // 2, (self.move_tracker_height[0] - text_size[0][1]) // 2
             mp = int(self.move_tracker_x_idxs[0, 0] + x_y_offset[0]), int(self.move_tracker_y_idxs[self.move_count, 0] + x_y_offset[1] + text_size[0][1])
-            cv2.putText(self.move_tracker_img, text, mp, self.font_face,
-                        self.move_tracker_font_scale_thickness[0], (int(color[0]), int(color[1]), int(color[2])), self.move_tracker_font_scale_thickness[1], lineType=cv2.LINE_AA)
+            cv2.putText(self.menus['notation']['img'], text, mp, self.font_face,
+                        self.font_scale_thickness[0], (int(color[0]), int(color[1]), int(color[2])), self.font_scale_thickness[1], lineType=cv2.LINE_AA)
         self.draw_move_tracker_onto_img(self.move_count)
 
         if current_i == 1:
@@ -383,29 +389,52 @@ class Img:
             start_i, end_i = self.move_count - self.move_tracker_display_max_count, self.move_count
 
         img_range_y = self.move_tracker_y_idxs[start_i + self.move_tracker_display_max_count, 1] - self.move_tracker_y_idxs[start_i, 0]
-        self.img[self.move_tracker_bbox[0]:self.move_tracker_bbox[0] + img_range_y, self.move_tracker_bbox[2]:self.move_tracker_bbox[3]] = self.move_tracker_img[self.move_tracker_y_idxs[start_i, 0]: self.move_tracker_y_idxs[start_i + self.move_tracker_display_max_count, 1]]
+        self.img[self.menu_bbox[0]:self.menu_bbox[0] + img_range_y, self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.move_tracker_y_idxs[start_i, 0]: self.move_tracker_y_idxs[start_i + self.move_tracker_display_max_count, 1]]
 
-    def return_button_ranges_and_corresponding_functions(self) -> (np.ndarray, list):
-        button_ranges, button_funcs = [], []
+    def return_menu_buttons(self) -> (np.ndarray, list):
 
-        def set_settings_cog():
+        button_ranges, button_funcs, settings_cog_return_img = [], [], None
+
+        def settings_cog():
             settings_cog_coverage = .05
             setting_cog_dim = int(settings_cog_coverage * self.img.shape[0])
+            edge_buffer = int(.2 * setting_cog_dim)
             settings_cog = cv2.resize(cv2.imread(dir.settings_cog_img_dir, cv2.IMREAD_UNCHANGED), (setting_cog_dim, setting_cog_dim))
             non_zero = np.column_stack((np.nonzero(settings_cog[0:, :, 3])))
             settings_cog_img = settings_cog[0:, :, 0:3]
             settings_cog_img[non_zero[:, 0], non_zero[:, 1], 0:3] = self.square_color_black
             non_zero_relative = non_zero - setting_cog_dim // 2
-            mp_cog_yx = 0 + setting_cog_dim // 2, self.img.shape[1] - setting_cog_dim // 2
+            mp_cog_yx = 0 + setting_cog_dim // 2 + edge_buffer, self.img.shape[1] - setting_cog_dim // 2 - edge_buffer
 
             self.img[mp_cog_yx[0] + non_zero_relative[:, 0], mp_cog_yx[1] + non_zero_relative[:, 1]] = settings_cog_img[non_zero[:, 0], non_zero[:, 1]]
+
+            cog_back_button_bbox = np.array([0 + edge_buffer, 0 + edge_buffer + setting_cog_dim, self.img.shape[1] - edge_buffer - setting_cog_dim, self.img.shape[1] - edge_buffer], dtype=np.uint16)
+            self.draw_border(self.img, cog_back_button_bbox)
             button_ranges.append(np.array([0, setting_cog_dim, self.img.shape[1] - setting_cog_dim, self.img.shape[1]]))
-            print('b')
+            button_funcs.append(self.open_settings_menu)
+
+        def new_game_button():
+            text = 'New Game'
+            text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
+            mp_xy = (self.img.shape[1] * .5 + self.board_img_bbox[3] * 1.5) // 2 - (text_size[0][0] // 2), (self.img.shape[0] + self.board_img_bbox[1]) // 2 + (text_size[0][1] // 2),
+            cv2.putText(self.img, text, (int(mp_xy[0]), int(mp_xy[1])), self.font_face, self.font_scale_thickness[0], (255, 255, 255), self.font_scale_thickness[1], lineType=cv2.LINE_AA)
+            bbox = np.array([mp_xy[1] - text_size[0][1] - text_size[1] // 2, mp_xy[1] + text_size[1] // 2, mp_xy[0], mp_xy[0] + text_size[0][0]], dtype=np.uint16)
+            button_ranges.append(bbox)
+            self.draw_border(self.img, bbox)
+            button_funcs.append(self.open_new_game_menu())
+
+        def export_moves_to_json():
+            text = 'Export Notation'
+            text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
+            mp_xy = (self.img.shape[1] * 1.5 + self.board_img_bbox[3] * .5) // 2 - (text_size[0][0] // 2), (self.img.shape[0] + self.board_img_bbox[1]) // 2 + (text_size[0][1] // 2),
+            cv2.putText(self.img, text, (int(mp_xy[0]), int(mp_xy[1])), self.font_face, self.font_scale_thickness[0], (255, 255, 255), self.font_scale_thickness[1], lineType=cv2.LINE_AA)
+            bbox = np.array([mp_xy[1] - text_size[0][1] - text_size[1] // 2, mp_xy[1] + text_size[1] // 2, mp_xy[0], mp_xy[0] + text_size[0][0]], dtype=np.uint16)
+            button_ranges.append(bbox)
+            button_funcs.append(self.export_moves())
             pass
 
-        set_settings_cog()
-
-        return 0, 0
+        settings_cog(), new_game_button(), export_moves_to_json()
+        return np.vstack(button_ranges), button_funcs, settings_cog_return_img
 
     def return_settings_menu(self, bbox, menu_dict):
         settings_template_img = np.zeros((bbox[1] - bbox[0], bbox[3] - bbox[2], 3), dtype=np.uint8)
@@ -430,7 +459,6 @@ class Img:
         starting_radius = int((hsv_starting_color[1] / (sat_min + sat_range)) * hsv_wheel_size)
         starting_cursor_xy = int(starting_radius * np.cos((hsv_starting_color[0] / 179) * 360)) + hsv_wheel_size // 2, int(starting_radius * np.sin((hsv_starting_color[0] / 179) * 360)) + hsv_wheel_size // 2
 
-        starting_idx = np.argwhere(np.logical_and(bgr_values[:, 0] == hsv_starting_color[0], bgr_values[:, 1] == hsv_starting_color[1]))
         starting_cursor_idx = np.argmin(np.sum(np.abs(hsv_wheel_values - self.square_color_black), axis=1))
         color_wheel_img[hsv_yx[:, 0], hsv_yx[:, 1]] = bgr_values
 
@@ -440,38 +468,107 @@ class Img:
         cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
         cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (255, 255, 255), 1, lineType=cv2.LINE_AA)
 
-        sound_bbox_length = max(int(hsv_wheel_size * .1), 1)
-        color_wheel_start_yx = settings_template_img.shape[0] - y_offset, x_offset
-        settings_template_img[settings_template_img.shape[0] - y_offset - current_menu_wheel_img.shape[0]:settings_template_img.shape[0] - y_offset, x_offset: x_offset + current_menu_wheel_img.shape[1]] = current_menu_wheel_img
+        sound_bbox_length = max(int(hsv_wheel_size * .2), 1)
 
-        sound_text_size = cv2.getTextSize('Sound', self.font_face, self.move_tracker_font_scale_thickness[0], self.move_tracker_font_scale_thickness[1])
-        xy_text_offset = (settings_template_img.shape[0] // 2 - sound_text_size[0][1]) // 4, (settings_template_img.shape[1] - sound_text_size[0][0]) // 4
-        xy_checkbox_offset = (settings_template_img.shape[0] // 2 - sound_bbox_length) // 4, (settings_template_img.shape[1] - sound_text_size[0][0]) // 4
-        cv2.putText(settings_template_img, 'Sound On', (0 + xy_text_offset[1], 0 + xy_text_offset[0]), self.font_face, self.move_tracker_font_scale_thickness[0], (255, 255, 255), self.move_tracker_font_scale_thickness[1], cv2.LINE_AA)
-        y_mp_checkbox = xy_text_offset[0] - sound_text_size[1] - sound_bbox_length // 2
 
-        bbox_checkbox = np.array([y_mp_checkbox, y_mp_checkbox + sound_bbox_length, settings_template_img.shape[1] // 2 + xy_checkbox_offset[0], settings_template_img.shape[1] // 2 + xy_checkbox_offset[0] + sound_bbox_length])
-        settings_template_img[bbox_checkbox[0]:bbox_checkbox[1], bbox_checkbox[2]:bbox_checkbox[3]] = self.square_color_black
-        bboxs = np.vstack((np.array([self.move_tracker_bbox[0] + color_wheel_start_yx[0], self.move_tracker_bbox[0] + color_wheel_start_yx[0] + settings_template_img.shape[0],
-                                           self.move_tracker_bbox[2] + color_wheel_start_yx[1], self.move_tracker_bbox[2] + color_wheel_start_yx[1] + settings_template_img.shape[1]]),
-                                 np.array([self.move_tracker_bbox[0] + bbox_checkbox[0], self.move_tracker_bbox[0] + bbox_checkbox[1],
-                                           self.move_tracker_bbox[2] + bbox_checkbox[2], self.move_tracker_bbox[2] + bbox_checkbox[3]])))
+        self.checkbox_size_all_fill = int(sound_bbox_length), int((sound_bbox_length * self.checkbox_checked_fill_percentage) // 4)
+        bbox_checkbox = self.draw_initial_options_checkbox_and_return_bbox('Sound', settings_template_img, vertical_placement_percentage=.25, is_checked=True)
+        color_wheel_bbox = np.array([settings_template_img.shape[0] - y_offset - current_menu_wheel_img.shape[0], settings_template_img.shape[0] - y_offset, x_offset, x_offset + current_menu_wheel_img.shape[1]])
+        settings_template_img[color_wheel_bbox[0]:color_wheel_bbox[1], color_wheel_bbox[2]:color_wheel_bbox[3]] = current_menu_wheel_img
 
-        menu_dict['settings'] = {'funcs': [self.set_accent_color, self.set_sound_setting], 'bboxs': bboxs}
-        return settings_template_img, color_wheel_img
+        bboxs = np.vstack((np.array([self.menu_bbox[0] + color_wheel_bbox[0], self.menu_bbox[0] + color_wheel_bbox[1],
+                                     self.menu_bbox[2] + color_wheel_bbox[2], self.menu_bbox[2] + color_wheel_bbox[3]]),
+                           np.array([self.menu_bbox[0] + bbox_checkbox[0], self.menu_bbox[0] + bbox_checkbox[1],
+                                     self.menu_bbox[2] + bbox_checkbox[2], self.menu_bbox[2] + bbox_checkbox[3]])))
 
-    def set_accent_color(self, x, y):
-        pass
+        menu_dict['settings'] = {'funcs': [self.set_accent_color, self.set_sound_setting], 'bboxs': bboxs, 'img': settings_template_img}
 
-    def set_sound_setting(self):
+        return color_wheel_img, hsv_cursor_selector_radius, (starting_cursor_xy[1], starting_cursor_xy[0])
+
+    def draw_menu(self, img):
+        self.img[self.menu_bbox[0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = img
+
+    def return_new_game_menu(self, bbox, menu_dict):
+        menu_img = np.zeros((bbox[1] - bbox[0], bbox[3] - bbox[2]), dtype=np.uint8)
+        fisher_text = cv2.getTextSize('Sound', self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
         pass
 
     def open_settings_menu(self):
-        t = self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]]
-        personal_utils.image_show(self.img)
-        self.img_color_idxs = np.column_stack(np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.square_color_black, axis=-1))) + (self.board_img_bbox[0], self.board_img_bbox[2])
-        self.move_tracker_color_idxs = np.column_stack(np.argwhere(np.all(self.move_tracker_color_idxs[0:self.move_tracker_y_idxs[self.move_count], self.move_tracker_x_idxs[-1, 0]:, self.move_tracker_x_idxs[-1, 1]] == self.square_color_black, axis=-1))) + (0, self.move_tracker_x_idxs[-1, 0])
-        pass
+        if self.current_menu != 'settings':
+            self.draw_menu(self.menus['settings']['img'])
+            self.board_color_idxs = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.square_color_black, axis=-1)) + (self.board_img_bbox[0], self.board_img_bbox[2])
+            self.board_color_idxs_moves_black = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.grid_square_templates[0, 1, 0, 0], axis=-1)) + (self.board_img_bbox[0], self.board_img_bbox[2])
+            self.board_color_idxs_moves_white = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.grid_square_templates[1, 1, 0, 0], axis=-1)) + (self.board_img_bbox[0], self.board_img_bbox[2])
+            self.current_menu = 'settings'
+        else:
+            self.current_menu = 'notation'
+            self.draw_move_tracker_onto_img(self.move_count)
+
+
+    def set_accent_color(self):
+        bbox_draw = self.menus['settings']['bboxs'][0]
+        yx_adj = self.mouse_xy[1] - bbox_draw[0],  self.mouse_xy[0] - bbox_draw[2]
+        color_selected = self.color_wheel[yx_adj[0], yx_adj[1]]
+        self.square_color_black = color_selected
+        self.valid_move_color = np.full(3, 255) - self.square_color_black
+        self.grid_square_templates[0] = self.square_color_white
+        self.grid_square_templates[1] = self.square_color_black
+
+        for square in self.grid_square_templates:
+            square[1] = square[0] * .35 + self.valid_move_color * .65
+        if np.all(color_selected != 0):
+            color_wheel_bbox = self.menus['settings']['bboxs'][0]
+            relative_bbox = color_wheel_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+            previous_cursor_bbox = np.array([self.current_color_cursor_location_yx[0] - self.color_wheel_cursor_radius - 2, self.current_color_cursor_location_yx[0] + self.color_wheel_cursor_radius + 2,
+                                             self.current_color_cursor_location_yx[1] - self.color_wheel_cursor_radius - 2, self.current_color_cursor_location_yx[1] + self.color_wheel_cursor_radius + 2], dtype=np.uint16)
+            template_img_bbox = np.repeat((relative_bbox[0], relative_bbox[2]), 2) + previous_cursor_bbox
+            draw_bbox = np.repeat((bbox_draw[0], bbox_draw[2]), 2) + previous_cursor_bbox
+
+            #Clears cursor off of the current setting img and the output img
+            for img, bbox in zip((self.menus['settings']['img'], self.img), (relative_bbox, bbox_draw)):
+                color_array_bbox = np.repeat((bbox[0], bbox[2]), 2) + previous_cursor_bbox
+                img[color_array_bbox[0]:color_array_bbox[1], color_array_bbox[2]:color_array_bbox[3]] = self.color_wheel[previous_cursor_bbox[0]:previous_cursor_bbox[1], previous_cursor_bbox[2]:previous_cursor_bbox[3]]
+                new_cursor_xy = int(bbox[2] + yx_adj[1]), int(bbox[0] + yx_adj[0])
+                cv2.circle(img, new_cursor_xy, self.color_wheel_cursor_radius, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
+                cv2.circle(img, new_cursor_xy, self.color_wheel_cursor_radius, (0, 0, 0), 1, lineType=cv2.LINE_AA)
+            cv2.imshow(self.window_name, self.img)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                cv2.destroyAllWindows()
+
+            self.current_color_cursor_location_yx = yx_adj
+
+            for draw_idxs in (self.board_color_idxs, self.axes_color_idxs):
+                if draw_idxs.shape[0] != 0:
+                    self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color_selected
+
+            for draw_idxs, color in zip((self.board_color_idxs_moves_white, self.board_color_idxs_moves_black), (self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
+                self.img[draw_idxs[:,0], draw_idxs[:,1]] = color
+
+            if self.sound_is_on:
+                sound_bbox = self.menus['settings']['bboxs'][1]
+                relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+                self.fill_checkbox(self.menus['settings']['img'], relative_bbox, False)
+                self.fill_checkbox(self.img, sound_bbox, False)
+
+    def finalize_accent_color(self):
+        for piece_idxs, color in zip((self.piece_imgs_black_square_idxs, self.piece_imgs_drawn_move_idxs_w, self.piece_imgs_drawn_move_idxs_b), (self.square_color_black, self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
+            self.piece_imgs[piece_idxs[0], piece_idxs[1], piece_idxs[2], piece_idxs[3], piece_idxs[4], piece_idxs[5]] = color
+        self.current_menu = 'notation'
+
+
+
+
+
+    def set_sound_setting(self):
+        sound_bbox = self.menus['settings']['bboxs'][1]
+        relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+        self.fill_checkbox(self.menus['settings']['img'], relative_bbox, self.sound_is_on)
+        self.fill_checkbox(self.img, sound_bbox, self.sound_is_on)
+        self.sound_is_on = not self.sound_is_on
+
+
+
+
 
     def close_settings_menu(self):
         pass
@@ -481,6 +578,64 @@ class Img:
 
     def close_new_game_menu(self):
         pass
+
+    def export_moves(self):
+        pass
+
+    def fill_checkbox(self, img, bbox, unfill=False):
+        if unfill:
+            img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = (255, 255, 255)
+            # fill_bbox = mp_yx[0] - fill_length // 2, mp_yx[0] + fill_length // 2, mp_yx[1] - fill_length // 2, mp_yx[1] + fill_length // 2
+            # img[fill_bbox[0]:fill_bbox[1], fill_bbox[2]:fill_bbox[3]] = (255, 255, 255)
+        else:
+            mp_xy = int((bbox[3] + bbox[2]) // 2), int((bbox[1] + bbox[0]) // 2)
+            cv2.circle(img, mp_xy, self.checkbox_size_all_fill[1], (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
+
+
+    def draw_initial_options_checkbox_and_return_bbox(self, text, img, vertical_placement_percentage, is_checked=False) -> np.ndarray:
+        sound_text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
+        xy_text_offset = int((img.shape[0] // 2 - sound_text_size[0][1]) * vertical_placement_percentage), int((img.shape[1] - sound_text_size[0][0]) * vertical_placement_percentage)
+        xy_checkbox_offset = (img.shape[0] // 2 - self.checkbox_size_all_fill[0]) // 4, (img.shape[1] - sound_text_size[0][0]) // 4
+        cv2.putText(img, text, (0 + xy_text_offset[1], 0 + xy_text_offset[0]), self.font_face, self.font_scale_thickness[0], (255, 255, 255), self.font_scale_thickness[1], cv2.LINE_AA)
+        y_mp_checkbox = xy_text_offset[0] - self.checkbox_size_all_fill[0] // 2
+        bbox_checkbox = np.array([sound_text_size[0][1] // 2 + y_mp_checkbox, sound_text_size[0][1] // 2 + y_mp_checkbox + self.checkbox_size_all_fill[0] // 2, img.shape[1] // 2 + xy_checkbox_offset[0], img.shape[1] // 2 + xy_checkbox_offset[0] + self.checkbox_size_all_fill[0] // 2],
+                                 dtype=np.uint16)
+        img[bbox_checkbox[0]:bbox_checkbox[1], bbox_checkbox[2]:bbox_checkbox[3]] = (255, 255, 255)
+
+        if is_checked:
+            self.fill_checkbox(img, bbox_checkbox, unfill=False)
+
+        return bbox_checkbox
+
+    def draw_border(self, img, bbox):
+        rectangle_border_points = (bbox[2] - self.border_thickness, bbox[0] - self.border_thickness), \
+                                  (bbox[3] + self.border_thickness, bbox[1] + self.border_thickness)
+        cv2.rectangle(img, rectangle_border_points[0], rectangle_border_points[1], (255, 255, 255), self.border_thickness, cv2.LINE_AA)
+
+    def return_to_previous_game_state(self):
+        pass
+
+    def return_to_current_game_state(self):
+        pass
+
+    def click_is_on(self, location, mouse_x, mouse_y):
+        click_bool = False
+
+        if location == 'board':
+            bbox = self.board_img_bbox
+        elif location == 'button':
+            bbox = self.button_ranges
+        elif location == 'menu':
+            bbox = self.menu_bbox
+
+        if len(bbox.shape) == 1:
+            if bbox[2] < mouse_x < bbox[3] and bbox[0] < mouse_y < bbox[1]:
+                click_bool = True
+        else:
+            if np.any(np.logical_and(np.logical_and(bbox[:, 0] <= mouse_y, bbox[:, 1] >= mouse_y), np.logical_and(bbox[:, 2] <= mouse_x, bbox[:, 3] >= mouse_x))):
+                click_bool = True
+
+        return click_bool
 
 
 white_i, black_i = 0, 1
@@ -1067,7 +1222,9 @@ def main():
 
     def mouse_handler(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
-            if o_img.click_is_on_board(x, y):
+            if o_img.click_is_on('board', x, y):
+                if o_img.current_menu == 'settings':
+                    o_img.finalize_accent_color()
                 idx_y_x = o_img.return_y_x_idx(x, y)
                 if o_img.promotion_ui_bbox_yx is not None:
                     if o_img.promotion_ui_bbox_yx[0] < y < o_img.promotion_ui_bbox_yx[1] and o_img.promotion_ui_bbox_yx[2] < x < o_img.promotion_ui_bbox_yx[3]:
@@ -1085,6 +1242,21 @@ def main():
                     pass
                 else:
                     draw_potential_moves(idx_y_x)
+
+            elif o_img.click_is_on('menu', x, y):
+                menu_button_bboxs = o_img.menus[o_img.current_menu]['bboxs']
+                menu_button_idx = np.argwhere(np.logical_and(np.logical_and(menu_button_bboxs[:, 0] <= y, menu_button_bboxs[:, 1] >= y), np.logical_and(menu_button_bboxs[:, 2] <= x, menu_button_bboxs[:, 3] >= x))).flatten()
+                o_img.mouse_xy = x, y
+                if menu_button_idx.shape[0] != 0:
+                    o_img.menus[o_img.current_menu]['funcs'][int(menu_button_idx)]()
+
+
+            elif o_img.click_is_on('button', x, y):
+                button_bboxs = o_img.button_ranges
+                button_idx = np.argwhere(np.logical_and(np.logical_and(button_bboxs[:, 0] <= y, button_bboxs[:, 1] >= y), np.logical_and(button_bboxs[:, 2] <= x, button_bboxs[:, 3] >= x))).flatten()
+                o_img.mouse_xy = x, y
+                if button_idx.shape[0] != 0:
+                    o_img.button_funcs[int(button_idx)]()
 
     cv2.setMouseCallback('Chess', mouse_handler)
     set_starting_board_state()
