@@ -69,6 +69,7 @@ class Img:
         self.font_scale_thickness = None
         self.notation_tracker = [['White'], ['Black']]
         self.notation_tracker_display_max_count, self.menu_bbox, self.notation_y_idxs, self.notation_x_idxs, self.notation_scroll_bar_bbox, = self.return_notation_idxs(self.menus)
+        self.notation_img_template = self.menus['notation']['img'].copy()
         self.color_wheel, self.color_wheel_cursor_radius, self.current_color_cursor_location_yx = self.return_settings_menu(self.menu_bbox, self.menus)
         self.return_new_game_menu(self.menu_bbox, self.menus)
 
@@ -511,6 +512,8 @@ class Img:
         self.fisher = not self.fisher
 
     def open_new_game_menu(self):
+        if self.current_menu == 'settings':
+            self.finalize_accent_color()
         self.current_menu = 'newgame'
         button_bbox = self.buttons['settings']['bbox']
         self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][1]
@@ -537,13 +540,14 @@ class Img:
             self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
             self.draw_move_tracker_onto_img(self.move_count)
 
-
     def start_new_game(self):
         global new_game
         new_game = True
         self.move_count = 1
-        self.draw_move_tracker_onto_img(self.move_count)
         self.current_menu = 'notation'
+        self.menus['notation']['img'] = self.notation_img_template.copy()
+        self.draw_move_tracker_onto_img(self.move_count)
+
 
     def set_accent_color(self):
         bbox_draw = self.menus['settings']['bboxs'][0]
@@ -597,6 +601,7 @@ class Img:
             button_bbox = self.buttons['settings']['bbox']
             self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][1]
 
+
             if self.sound_is_on:
                 sound_bbox = self.menus['settings']['bboxs'][1]
                 relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
@@ -613,6 +618,14 @@ class Img:
         for y_idx, text in zip(self.notation_y_idxs, self.notation_tracker[1]):
             self.menus['notation']['img'][y_idx[0]:y_idx[1], x_idxs[0]:x_idxs[1]] = 0
             self.draw_centered_text(self.menus['notation']['img'], text, np.hstack((y_idx, x_idxs)), text_color=self.square_color_black)
+
+        relative_bbox = self.menus['newgame']['bboxs'][1] - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+        self.draw_centered_text(self.menus['newgame']['img'], 'Start Game', relative_bbox, (0, 0, 0), fill_color=self.square_color_black)
+        if self.fisher:
+            chess_960_bbox = self.menus['newgame']['bboxs'][0]
+            relative_bbox = chess_960_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+            self.fill_checkbox(self.menus['settings']['img'], relative_bbox, False)
+
 
     def draw_centered_text(self, img, text, bbox, text_color, fill_color=None, return_bbox=False) -> np.ndarray or None:
 
