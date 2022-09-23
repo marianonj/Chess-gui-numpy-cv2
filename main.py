@@ -1069,23 +1069,24 @@ def main():
                             # Castle Check
                             if np.any(valid_single_moves != 0):
                                 valid_squares_yx = single_moves[np.argwhere(valid_single_moves).flatten()]
-                                if rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1]:
-                                    for rook_has_moved_i, rook_x_value, king_x_offset in zip((0, 2), (0, 7), (-2, 2)):
-                                        if rook_king_rook_has_not_moved[turn_i_current_opponent[0], rook_has_moved_i]:
-                                            if rook_x_value > piece_yx_idx[1]:
-                                                castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_value)
-                                            else:
-                                                castle_x_idxs = np.arange(rook_x_value + 1, piece_yx_idx[1])
-                                            castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
-                                            if np.all(board_state_pieces_colors_squares[0, castle_idxs_all[:, 0], castle_idxs_all[:, 1]] == 0):
-                                                castle_bool = True
-                                                for castle_idx in castle_idxs_all:
-                                                    square_is_not_protected = return_potential_moves(castle_idx, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
-                                                    if square_is_not_protected is not None:
-                                                        castle_bool = False
-                                                        break
-                                                if castle_bool:
-                                                    valid_squares_yx = np.vstack((valid_squares_yx, np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)))
+                                if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
+                                    if rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1]:
+                                        for rook_has_moved_i, rook_x_value, king_x_offset in zip((0, 2), (0, 7), (-2, 2)):
+                                            if rook_king_rook_has_not_moved[turn_i_current_opponent[0], rook_has_moved_i]:
+                                                if rook_x_value > piece_yx_idx[1]:
+                                                    castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_value)
+                                                else:
+                                                    castle_x_idxs = np.arange(rook_x_value + 1, piece_yx_idx[1])
+                                                castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
+                                                if np.all(board_state_pieces_colors_squares[0, castle_idxs_all[:, 0], castle_idxs_all[:, 1]] == 0):
+                                                    castle_bool = True
+                                                    for castle_idx in castle_idxs_all:
+                                                        square_is_not_protected = return_potential_moves(castle_idx, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                                                        if square_is_not_protected is not None:
+                                                            castle_bool = False
+                                                            break
+                                                    if castle_bool:
+                                                        valid_squares_yx = np.vstack((valid_squares_yx, np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)))
                     else:
                         valid_squares_yx = return_potential_moves(piece_yx_idx, (piece_id,), obstruction_check=True)
 
