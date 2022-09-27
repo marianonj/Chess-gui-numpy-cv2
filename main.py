@@ -336,7 +336,7 @@ class Img:
         self.draw_board(draw_idxs, promotion_pos_array, pre_move=True)
         self.drawn_moves = draw_idxs
 
-    def draw_move_tracker_text(self, current_i, yx_initial, yx_selected, piece, row_identifier=False, column_identifier=False, piece_captured=False, piece_promotion=None, castle_text=None, game_state_text=None):
+    def draw_notation_text(self, current_i, yx_initial, yx_selected, piece, row_identifier=False, column_identifier=False, piece_captured=False, piece_promotion=None, castle_text=None, game_state_text=None):
         if castle_text is None:
             if piece != Pieces.pawn:
                 text = f'{self.piece_abbreviations[piece.name]}'
@@ -374,13 +374,14 @@ class Img:
             self.move_count += 1
 
     def draw_move_tracker_onto_img(self, start_i):
-        if self.move_count <= self.notation_tracker_display_max_count:
+        if self.move_count < self.notation_tracker_display_max_count:
             start_i, end_i = 0, start_i
+            img_range_y = self.notation_y_idxs[start_i + self.notation_tracker_display_max_count, 1] - self.notation_y_idxs[start_i, 0]
+            self.img[self.menu_bbox[0]:self.menu_bbox[0] + img_range_y, self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[start_i + self.notation_tracker_display_max_count, 1]]
         else:
-            start_i, end_i = self.move_count - self.notation_tracker_display_max_count, self.move_count
+            start_i, end_i = self.move_count - self.notation_tracker_display_max_count + 1, self.move_count
+            self.img[self.menu_bbox[0] + self.notation_y_idxs[1, 0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[end_i, 1]]
 
-        img_range_y = self.notation_y_idxs[start_i + self.notation_tracker_display_max_count, 1] - self.notation_y_idxs[start_i, 0]
-        self.img[self.menu_bbox[0]:self.menu_bbox[0] + img_range_y, self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[start_i + self.notation_tracker_display_max_count, 1]]
 
     def draw_menu(self, img):
         self.img[self.menu_bbox[0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = img
@@ -500,9 +501,6 @@ class Img:
         menu_dict['newgame'] = {'funcs': (self.set_fisher, self.start_new_game), 'img': menu_img, 'bboxs': np.vstack((bbox_checkbox + np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2),
                                                                                                                       bbox_start + np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2)))}
 
-
-
-
     def open_new_game_menu(self):
         if self.current_menu == 'settings':
             self.finalize_accent_color()
@@ -531,6 +529,31 @@ class Img:
             self.current_menu = 'notation'
             self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
             self.draw_move_tracker_onto_img(self.move_count)
+
+    def finalize_accent_color(self):
+        for piece_idxs, color in zip((self.piece_imgs_black_square_idxs, self.piece_imgs_drawn_move_idxs_w, self.piece_imgs_drawn_move_idxs_b), (self.square_color_black, self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
+            self.piece_imgs[piece_idxs[0], piece_idxs[1], piece_idxs[2], piece_idxs[3], piece_idxs[4], piece_idxs[5]] = color
+        self.current_menu = 'notation'
+        button_bbox = self.buttons['settings']['bbox']
+        self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
+        x_idxs = self.notation_x_idxs[2]
+        for y_idx, text in zip(self.notation_y_idxs, self.notation_tracker[1]):
+            # Draws the selected accent color onto the template
+            if y_idx[0] == 0:
+                self.draw_centered_text(self.notation_img_template, text, np.hstack((y_idx, x_idxs)), text_color=self.square_color_black)
+            self.menus['notation']['img'][y_idx[0]:y_idx[1], x_idxs[0]:x_idxs[1]] = 0
+            self.draw_centered_text(self.menus['notation']['img'], text, np.hstack((y_idx, x_idxs)), text_color=self.square_color_black)
+            print('b')
+
+        relative_bbox = self.menus['newgame']['bboxs'][1] - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+        self.draw_centered_text(self.menus['newgame']['img'], 'Start Game', relative_bbox, (0, 0, 0), fill_color=self.square_color_black)
+
+        if self.fisher:
+            chess_960_bbox = self.menus['newgame']['bboxs'][0]
+            relative_bbox = chess_960_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+            self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, uncheck=False)
+
+
 
     def start_new_game(self):
         global new_game
@@ -619,28 +642,7 @@ class Img:
         self.fisher = not self.fisher
 
 
-    def finalize_accent_color(self):
-        for piece_idxs, color in zip((self.piece_imgs_black_square_idxs, self.piece_imgs_drawn_move_idxs_w, self.piece_imgs_drawn_move_idxs_b), (self.square_color_black, self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
-            self.piece_imgs[piece_idxs[0], piece_idxs[1], piece_idxs[2], piece_idxs[3], piece_idxs[4], piece_idxs[5]] = color
-        self.current_menu = 'notation'
-        button_bbox = self.buttons['settings']['bbox']
-        self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
-        x_idxs = self.notation_x_idxs[2]
-        for y_idx, text in zip(self.notation_y_idxs, self.notation_tracker[1]):
-            # Draws the selected accent color onto the template
-            if y_idx[0] == 0:
-                self.draw_centered_text(self.notation_img_template, text, np.hstack((y_idx, x_idxs)), text_color=self.square_color_black)
-            self.menus['notation']['img'][y_idx[0]:y_idx[1], x_idxs[0]:x_idxs[1]] = 0
-            self.draw_centered_text(self.menus['notation']['img'], text, np.hstack((y_idx, x_idxs)), text_color=self.square_color_black)
-            print('b')
 
-        relative_bbox = self.menus['newgame']['bboxs'][1] - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-        self.draw_centered_text(self.menus['newgame']['img'], 'Start Game', relative_bbox, (0, 0, 0), fill_color=self.square_color_black)
-
-        if self.fisher:
-            chess_960_bbox = self.menus['newgame']['bboxs'][0]
-            relative_bbox = chess_960_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-            self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, uncheck=False)
 
     def draw_centered_text(self, img, text, bbox, text_color, fill_color=None, return_bbox=False) -> np.ndarray or None:
         text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
@@ -654,10 +656,6 @@ class Img:
         if return_bbox:
             return bbox
 
-
-
-    def close_new_game_menu(self):
-        pass
 
     def export_moves(self):
         pass
@@ -795,7 +793,7 @@ def setup():
 
 
 def main():
-    global running, new_game
+    global new_game
 
     def set_starting_board_state(fisher=False):
         global new_game
@@ -1271,6 +1269,7 @@ def main():
             else:
                 if in_check:
                     game_state_text = '+'
+                    print('check')
 
             potential_ambiguous_moves = return_potential_moves(piece_next_yx, (piece_draw.value,), check_type='moves', )
             if potential_ambiguous_moves is not None:
@@ -1280,15 +1279,15 @@ def main():
                     same_pieces = potential_ambiguous_moves[same_piece_i]
                     if same_pieces.shape[0] == 1:
                         if same_pieces[0, 0] == piece_initial_yx[0, 0]:
-                            o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
+                            o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
                         else:
-                            o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
+                            o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
                     else:
-                        o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
+                        o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
                 else:
-                    o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=game_state_text)
+                    o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=game_state_text)
             else:
-                o_img.draw_move_tracker_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=castle_text)
+                o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=castle_text)
 
             king_in_check_valid_piece_idxs[turn_i_current_opponent[1]] = None
             king_in_check_valid_moves[turn_i_current_opponent[1]].clear()
@@ -1367,6 +1366,7 @@ def main():
 
     cv2.namedWindow(o_img.window_name)
     cv2.setMouseCallback('Chess', mouse_handler)
+    running = True
     while running:
         cv2.imshow(o_img.window_name, o_img.img)
         if new_game:
@@ -1379,5 +1379,5 @@ def main():
 
 
 if __name__ == '__main__':
-    running, new_game = True, True
+    new_game = True
     main()
