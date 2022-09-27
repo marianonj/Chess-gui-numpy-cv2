@@ -2,9 +2,8 @@
 # Lets go!
 import numpy as np
 from enum import Enum, auto
-import cv2, dir, personal_utils
-import vlc
-
+import cv2, dir, personal_utils, os, vlc
+import datetime
 
 class Img:
     total_image_size_yx = (720, 1280)
@@ -551,8 +550,6 @@ class Img:
             relative_bbox = chess_960_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
             self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, uncheck=False)
 
-
-
     def start_new_game(self):
         global new_game
         new_game = True
@@ -661,9 +658,22 @@ class Img:
             return bbox
 
     def export_moves(self):
+        if len(self.notation_tracker[0]) != 0:
+            time_now = datetime.datetime.now()
+            export_txt_file = f'{dir.export_directory}/{time_now.strftime("%d%m%y_%H%M%S")}.pgn'
+            move_str = ''
 
+            with open(export_txt_file, 'w') as f:
+                f.write(f'[FEN "{self.fen_notation}"] \n')
+                for i, white_move in enumerate(self.notation_tracker[0]):
+                    move_str = f'{move_str}{str(i + 1)}. {white_move}'
+                    try:
+                        black_move = self.notation_tracker[1][i + 1]
+                        move_str = f'{move_str} {black_move} '
+                    except IndexError:
+                        break
+                f.write(move_str)
 
-        pass
 
     def fill_checkbox(self, img, bbox, uncheck=True):
         img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = (255, 255, 255)
