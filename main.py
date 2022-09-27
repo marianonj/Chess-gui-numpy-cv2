@@ -471,8 +471,7 @@ class Img:
         current_menu_wheel_img, current_cursor_mp = color_wheel_img.copy(), hsv_yx[starting_cursor_idx]
 
         hsv_cursor_selector_radius = max(int(hsv_wheel_size * .0125), 1)
-        cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
-        cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (255, 255, 255), 1, lineType=cv2.LINE_AA)
+        cv2.circle(current_menu_wheel_img, starting_cursor_xy, hsv_cursor_selector_radius, (0, 0, 0), 1, lineType=cv2.LINE_AA)
 
         sound_bbox_length = max(int(hsv_wheel_size * .2), 1)
 
@@ -501,12 +500,8 @@ class Img:
         menu_dict['newgame'] = {'funcs': (self.set_fisher, self.start_new_game), 'img': menu_img, 'bboxs': np.vstack((bbox_checkbox + np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2),
                                                                                                                       bbox_start + np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2)))}
 
-    def set_fisher(self):
-        bbox_960 = self.menus['newgame']['bboxs'][0]
-        relative_bbox = bbox_960 - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-        self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, self.fisher)
-        self.fill_checkbox(self.img, bbox_960, self.fisher)
-        self.fisher = not self.fisher
+
+
 
     def open_new_game_menu(self):
         if self.current_menu == 'settings':
@@ -549,60 +544,80 @@ class Img:
     def set_accent_color(self):
         bbox_draw = self.menus['settings']['bboxs'][0]
         yx_adj = self.mouse_xy[1] - bbox_draw[0], self.mouse_xy[0] - bbox_draw[2]
-        color_selected = self.color_wheel[yx_adj[0], yx_adj[1]]
+        if yx_adj[0] < self.color_wheel.shape[0] and yx_adj[1] < self.color_wheel.shape[1]:
+            color_selected = self.color_wheel[yx_adj[0], yx_adj[1]]
+            if np.all(color_selected != 0):
+                self.square_color_black = color_selected
+                self.valid_move_color = np.full(3, 255) - self.square_color_black
+                self.grid_square_templates[1] = self.square_color_black
+                color_wheel_bbox = self.menus['settings']['bboxs'][0]
+                relative_bbox = color_wheel_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
 
-        if np.all(color_selected != 0):
-            self.square_color_black = color_selected
-            self.valid_move_color = np.full(3, 255) - self.square_color_black
-            self.grid_square_templates[1] = self.square_color_black
-            color_wheel_bbox = self.menus['settings']['bboxs'][0]
-            relative_bbox = color_wheel_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-            previous_cursor_bbox = np.array([self.current_color_cursor_location_yx[0] - self.color_wheel_cursor_radius - 2, self.current_color_cursor_location_yx[0] + self.color_wheel_cursor_radius + 2,
-                                             self.current_color_cursor_location_yx[1] - self.color_wheel_cursor_radius - 2, self.current_color_cursor_location_yx[1] + self.color_wheel_cursor_radius + 2], dtype=np.uint16)
+                for square in self.grid_square_templates:
+                    square[1] = square[0] * .35 + self.valid_move_color * .65
 
-            for square in self.grid_square_templates:
-                square[1] = square[0] * .35 + self.valid_move_color * .65
+                color_array_cursor_mask = np.zeros((self.color_wheel.shape[0], self.color_wheel.shape[1]), dtype=np.uint8)
+                cv2.circle(color_array_cursor_mask, (self.current_color_cursor_location_yx[1], self.current_color_cursor_location_yx[0]), self.color_wheel_cursor_radius, 255, -1, lineType=cv2.LINE_AA)
+                cv2.circle(color_array_cursor_mask, (self.current_color_cursor_location_yx[1], self.current_color_cursor_location_yx[0]), self.color_wheel_cursor_radius, 255, 1, lineType=cv2.LINE_AA)
+                color_wheel_non_zero = np.column_stack(np.nonzero(color_array_cursor_mask))
+                color_wheel_values = self.color_wheel[color_wheel_non_zero[:, 0], color_wheel_non_zero[:, 1]]
 
-            # Clears cursor off of the current setting img and the output img
-            for img, bbox in zip((self.menus['settings']['img'], self.img), (relative_bbox, bbox_draw)):
-                color_array_bbox = np.repeat((bbox[0], bbox[2]), 2) + previous_cursor_bbox
-                img[color_array_bbox[0]:color_array_bbox[1], color_array_bbox[2]:color_array_bbox[3]] = self.color_wheel[previous_cursor_bbox[0]:previous_cursor_bbox[1], previous_cursor_bbox[2]:previous_cursor_bbox[3]]
-                new_cursor_xy = int(bbox[2] + yx_adj[1]), int(bbox[0] + yx_adj[0])
-                cv2.circle(img, new_cursor_xy, self.color_wheel_cursor_radius, (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
-                cv2.circle(img, new_cursor_xy, self.color_wheel_cursor_radius, (0, 0, 0), 1, lineType=cv2.LINE_AA)
-            cv2.imshow(self.window_name, self.img)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                cv2.destroyAllWindows()
+                # Clears cursor off of the current setting img and the output img
+                for img, bbox in zip((self.menus['settings']['img'], self.img), (relative_bbox, bbox_draw)):
+                    color_wheel_idxs = color_wheel_non_zero + (bbox[0], bbox[2])
+                    img[color_wheel_idxs[:, 0], color_wheel_idxs[:, 1]] = color_wheel_values
+                    new_cursor_xy = int(bbox[2] + yx_adj[1]), int(bbox[0] + yx_adj[0])
+                    cv2.circle(img, new_cursor_xy, self.color_wheel_cursor_radius, (0, 0, 0), 1, lineType=cv2.LINE_AA)
+                cv2.imshow(self.window_name, self.img)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    cv2.destroyAllWindows()
 
-            self.current_color_cursor_location_yx = yx_adj
+                self.current_color_cursor_location_yx = yx_adj
 
-            for draw_idxs in (self.board_color_idxs, self.axes_color_idxs):
-                if draw_idxs.shape[0] != 0:
-                    self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color_selected
-                if draw_idxs is self.axes_color_idxs:
-                    # Keeps text sharp
-                    self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color_selected * self.axes_color_values
+                for draw_idxs in (self.board_color_idxs, self.axes_color_idxs):
+                    if draw_idxs.shape[0] != 0:
+                        self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color_selected
+                    if draw_idxs is self.axes_color_idxs:
+                        # Keeps text sharp
+                        self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color_selected * self.axes_color_values
 
-            for draw_idxs, color in zip((self.board_color_idxs_moves_white, self.board_color_idxs_moves_black), (self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
-                self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color
+                for draw_idxs, color in zip((self.board_color_idxs_moves_white, self.board_color_idxs_moves_black), (self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
+                    self.img[draw_idxs[:, 0], draw_idxs[:, 1]] = color
 
-            for key in self.buttons:
-                if self.buttons[key]['text']:
-                    bbox = self.buttons[key]['bbox']
-                    self.img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = color_selected
-                    cv2.putText(self.img, self.buttons[key]['text']['str'], self.buttons[key]['text']['xy'], self.font_face, self.font_scale_thickness[0], (0, 0, 0), self.font_scale_thickness[1], cv2.LINE_AA)
-                else:
-                    for img, color_idxs in zip(self.buttons['settings']['img']['img'], self.buttons['settings']['img']['coloridxs']):
-                        img[color_idxs[:, 0], color_idxs[:, 1]] = color_selected
+                for key in self.buttons:
+                    if self.buttons[key]['text']:
+                        bbox = self.buttons[key]['bbox']
+                        self.img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = color_selected
+                        cv2.putText(self.img, self.buttons[key]['text']['str'], self.buttons[key]['text']['xy'], self.font_face, self.font_scale_thickness[0], (0, 0, 0), self.font_scale_thickness[1], cv2.LINE_AA)
+                    else:
+                        for img, color_idxs in zip(self.buttons['settings']['img']['img'], self.buttons['settings']['img']['coloridxs']):
+                            img[color_idxs[:, 0], color_idxs[:, 1]] = color_selected
 
-            # Draws Back Button
-            button_bbox = self.buttons['settings']['bbox']
-            self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][1]
-            if self.sound_is_on:
-                sound_bbox = self.menus['settings']['bboxs'][1]
-                relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-                self.fill_checkbox(self.menus['settings']['img'], relative_bbox, False)
-                self.fill_checkbox(self.img, sound_bbox, False)
+                # Draws Back Button
+                button_bbox = self.buttons['settings']['bbox']
+                self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][1]
+
+                if self.sound_is_on:
+                    sound_bbox = self.menus['settings']['bboxs'][1]
+                    relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+                    self.fill_checkbox(self.menus['settings']['img'], relative_bbox, uncheck=False)
+                    self.fill_checkbox(self.img, sound_bbox, uncheck=False)
+
+    def set_sound_setting(self):
+        sound_bbox = self.menus['settings']['bboxs'][1]
+        relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+        self.fill_checkbox(self.menus['settings']['img'], relative_bbox, self.sound_is_on)
+        self.fill_checkbox(self.img, sound_bbox, self.sound_is_on)
+        self.sound_is_on = not self.sound_is_on
+
+    def set_fisher(self):
+        bbox_960 = self.menus['newgame']['bboxs'][0]
+        relative_bbox = bbox_960 - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+
+        self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, self.fisher)
+        self.fill_checkbox(self.img, bbox_960, self.fisher)
+        self.fisher = not self.fisher
+
 
     def finalize_accent_color(self):
         for piece_idxs, color in zip((self.piece_imgs_black_square_idxs, self.piece_imgs_drawn_move_idxs_w, self.piece_imgs_drawn_move_idxs_b), (self.square_color_black, self.grid_square_templates[0, 1, 0, 0], self.grid_square_templates[1, 1, 0, 0])):
@@ -625,7 +640,7 @@ class Img:
         if self.fisher:
             chess_960_bbox = self.menus['newgame']['bboxs'][0]
             relative_bbox = chess_960_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-            self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, False)
+            self.fill_checkbox(self.menus['newgame']['img'], relative_bbox, uncheck=False)
 
     def draw_centered_text(self, img, text, bbox, text_color, fill_color=None, return_bbox=False) -> np.ndarray or None:
         text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
@@ -639,12 +654,7 @@ class Img:
         if return_bbox:
             return bbox
 
-    def set_sound_setting(self):
-        sound_bbox = self.menus['settings']['bboxs'][1]
-        relative_bbox = sound_bbox - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
-        self.fill_checkbox(self.menus['settings']['img'], relative_bbox, self.sound_is_on)
-        self.fill_checkbox(self.img, sound_bbox, self.sound_is_on)
-        self.sound_is_on = not self.sound_is_on
+
 
     def close_new_game_menu(self):
         pass
@@ -652,14 +662,13 @@ class Img:
     def export_moves(self):
         pass
 
-    def fill_checkbox(self, img, bbox, unfill=False):
-        if unfill:
-            img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = (255, 255, 255)
-            # fill_bbox = mp_yx[0] - fill_length // 2, mp_yx[0] + fill_length // 2, mp_yx[1] - fill_length // 2, mp_yx[1] + fill_length // 2
-            # img[fill_bbox[0]:fill_bbox[1], fill_bbox[2]:fill_bbox[3]] = (255, 255, 255)
-        else:
+    def fill_checkbox(self, img, bbox, uncheck=True):
+        img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = (255, 255, 255)
+        if not uncheck:
             mp_xy = int((bbox[3] + bbox[2]) // 2), int((bbox[1] + bbox[0]) // 2)
             cv2.circle(img, mp_xy, self.checkbox_size_all_fill[1], (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
+
+
 
     def draw_initial_options_checkbox_and_return_bbox(self, text, img, vertical_placement_percentage, is_checked=False) -> np.ndarray:
         sound_text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
@@ -672,7 +681,7 @@ class Img:
         img[bbox_checkbox[0]:bbox_checkbox[1], bbox_checkbox[2]:bbox_checkbox[3]] = (255, 255, 255)
 
         if is_checked:
-            self.fill_checkbox(img, bbox_checkbox, unfill=False)
+            self.fill_checkbox(img, bbox_checkbox, uncheck=False)
 
         return bbox_checkbox
 
