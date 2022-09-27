@@ -4,8 +4,6 @@ import numpy as np
 from enum import Enum, auto
 import cv2, dir, personal_utils
 import vlc
-from playsound import playsound
-from typing import Tuple
 
 
 class Img:
@@ -83,6 +81,7 @@ class Img:
         self.previous_board_states = np.zeros((self.max_move_count * 2, 8, 8), dtype=np.uint16)
         self.sound_is_on = True
         self.current_game_state, self.current_menu = False, 'notation'
+        self.fen_notation = None
         self.mouse_xy = None
         self.fisher = False
 
@@ -382,7 +381,6 @@ class Img:
             start_i, end_i = self.move_count - self.notation_tracker_display_max_count + 1, self.move_count
             self.img[self.menu_bbox[0] + self.notation_y_idxs[1, 0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[end_i, 1]]
 
-
     def draw_menu(self, img):
         self.img[self.menu_bbox[0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = img
 
@@ -641,8 +639,14 @@ class Img:
         self.fill_checkbox(self.img, bbox_960, self.fisher)
         self.fisher = not self.fisher
 
-
-
+    def set_fen_notation_str(self, row_values=None):
+        if self.fisher:
+            fen_str_w = ''
+            for piece_id in row_values:
+                fen_str_w = f'{fen_str_w}{self.piece_abbreviations[Pieces(piece_id - 1).name]}'
+            self.fen_notation = f'{fen_str_w.lower()}/pppppppp/8/8/8/8/PPPPPPPP/{fen_str_w} w KQkq - 0 1'
+        else:
+            self.fen_notation = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'
 
     def draw_centered_text(self, img, text, bbox, text_color, fill_color=None, return_bbox=False) -> np.ndarray or None:
         text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
@@ -656,8 +660,9 @@ class Img:
         if return_bbox:
             return bbox
 
-
     def export_moves(self):
+
+
         pass
 
     def fill_checkbox(self, img, bbox, uncheck=True):
@@ -665,7 +670,6 @@ class Img:
         if not uncheck:
             mp_xy = int((bbox[3] + bbox[2]) // 2), int((bbox[1] + bbox[0]) // 2)
             cv2.circle(img, mp_xy, self.checkbox_size_all_fill[1], (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
-
 
 
     def draw_initial_options_checkbox_and_return_bbox(self, text, img, vertical_placement_percentage, is_checked=False) -> np.ndarray:
@@ -797,6 +801,7 @@ def main():
 
     def set_starting_board_state(fisher=False):
         global new_game
+
         nonlocal rook_king_rook_has_not_moved, en_passant_tracker, king_closest_obstructing_pieces_is, board_state_pieces_colors_squares, king_in_check_valid_piece_idxs, king_in_check_valid_moves, king_positions_yx, turn_i_current_opponent
         if not fisher:
             non_pawn_row_values = np.array([Pieces.rook.value, Pieces.knight.value, Pieces.bishop.value, Pieces.queen.value, Pieces.king.value, Pieces.bishop.value, Pieces.knight.value, Pieces.rook.value], dtype=np.uint8) + 1
@@ -811,6 +816,9 @@ def main():
             remaining_squares = np.argwhere(non_pawn_row_values == 0)
             non_pawn_row_values[remaining_squares[0::2]] = Pieces.rook.value + 1
             non_pawn_row_values[remaining_squares[1]] = Pieces.king.value + 1
+
+        o_img.set_fen_notation_str(row_values=non_pawn_row_values)
+
 
         board_state_pieces_colors_squares[0:2, 0:] = 0
         for piece_color_i, pawn_row_i, non_pawn_row_i, in zip((white_i, black_i), (6, 1), (7, 0)):
@@ -890,7 +898,7 @@ def main():
             vector_magnitude_range = np.column_stack((np.arange(1, abs(vector[0]) + 1), np.arange(1, abs(vector[0]) + 1)))
             return start_yx + vector_magnitude_range * vector_sign
 
-    def return_potential_moves(end_yx: tuple, piece_ids: Tuple[int, ...], check_type: str = 'moves', pawn_movement=False, pawn_attack=False, en_passant_check=False, obstruction_check=False, vector_magnitude_overwrite=(None, None)) -> np.ndarray or None or False:
+    def return_potential_moves(end_yx: tuple, piece_ids: tuple, check_type: str = 'moves', pawn_movement=False, pawn_attack=False, en_passant_check=False, obstruction_check=False, vector_magnitude_overwrite=(None, None)) -> np.ndarray or None or False:
         valid_squares_yx = []
         if piece_ids[0] == Pieces.pawn.value:
             piece_ids = (Pieces.pawn_movement.value, Pieces.pawn_attack.value)
