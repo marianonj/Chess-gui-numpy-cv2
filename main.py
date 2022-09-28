@@ -362,7 +362,6 @@ class Img:
         bbox_start_game = np.array([menu_img.shape[0] // 2, menu_img.shape[0], menu_img.shape[1] // 2, menu_img.shape[1] // 2], dtype=np.uint16)
         bbox_start = self.draw_centered_text(menu_img, 'Start Game', bbox_start_game, (0, 0, 0), fill_color=self.square_color_black, return_bbox=True)
         self.draw_border(menu_img, bbox_start)
-        t = np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2)
         menu_dict['newgame'] = {'funcs': (self.set_fisher, self.start_new_game), 'img': menu_img, 'bboxs': np.vstack((bbox_checkbox + np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2),
                                                                                                                       bbox_start + np.repeat((self.menu_bbox[0], self.menu_bbox[2]), 2)))}
 
@@ -513,7 +512,7 @@ class Img:
 
 
 
-        relative_bbox = self.menus['newgame']['bboxs'][1] - (self.menu_bbox[0], self.menu_bbox[0], self.menu_bbox[2], self.menu_bbox[2])
+        relative_bbox = self.menus['newgame']['bboxs'][1] - (self.menu_bbox[0] - 1, self.menu_bbox[0] - 1, self.menu_bbox[2] + 1, self.menu_bbox[2])
         self.draw_centered_text(self.menus['newgame']['img'], 'Start Game', relative_bbox, (0, 0, 0), fill_color=self.square_color_black)
 
         if self.fisher:
@@ -543,6 +542,8 @@ class Img:
             pass
 
     def draw_centered_text(self, img, text, bbox, text_color, fill_color=None, return_bbox=False) -> np.ndarray or None:
+        img[bbox[0]:bbox[1], bbox[2]:bbox[3]] = 0, 0, 0
+
         text_size = cv2.getTextSize(text, self.font_face, self.font_scale_thickness[0], self.font_scale_thickness[1])
         mp_xy = (bbox[3] + bbox[2] - text_size[0][0]) // 2, ((bbox[0] + bbox[1]) + text_size[0][1] - text_size[1] // 2) // 2
         bbox = np.array([mp_xy[1] - text_size[0][1] - text_size[1] // 2, mp_xy[1] + text_size[1] // 2, mp_xy[0], mp_xy[0] + text_size[0][0]], dtype=np.uint16)
@@ -859,7 +860,8 @@ def main():
         turn_i_current_opponent = (white_i, black_i)
 
         o_img.set_fen_notation_str(row_values=non_pawn_row_values)
-        o_img.draw_board_status(f'{o_img.status_bar_strs[0]} to move', text_color=(255, 255, 255))
+        o_img.status_bar_current_text = f'{o_img.status_bar_strs[0]} to move'
+        o_img.draw_board_status(o_img.status_bar_current_text, text_color=(255, 255, 255))
 
         o_img.notation_tracker = [[], []]
         game_has_not_ended = True
@@ -1303,7 +1305,7 @@ def main():
                 game_has_not_ended = False
                 if in_check:
                     game_state_text = '++'
-                    o_img.status_bar_current_text = f'{o_img.status_bar_strs[turn_i_current_opponent[1]]} has checkmated {o_img.status_bar_strs[turn_i_current_opponent[0]]}!!!'
+                    o_img.status_bar_current_text = f'{o_img.status_bar_strs[turn_i_current_opponent[1]]} has won!'
                     if turn_i_current_opponent[1] == white_i:
                         text_color = (255, 255, 255)
                     else:
