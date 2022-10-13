@@ -61,26 +61,33 @@ class Img:
         self.row_text, self.column_text = 'abcdefgh', '87654321'
         self.piece_location_str_grid = self.return_piece_location_text_grid()
         self.axes_color_idxs, self.axes_color_values = self.draw_grid_axes()
-        self.move_count = 1
+        self.move_count, self.current_turn_i = 1, 0
 
         # Defined in below function
         self.font_scale_thickness = None
         self.draw_notation_titles = True
         self.notation_tracker = [[], []]
-        self.notation_tracker_display_max_count, self.menu_bbox, self.notation_y_idxs, self.notation_x_idxs, self.notation_scroll_bar_bbox, = self.return_notation_idxs(self.menus)
+        self.notation_tracker_display_max_count, self.menu_bbox, self.notation_y_idxs, self.notation_x_idxs, self.notation_scroll_bar_bbox, self.notation_cursor_x_idxs, self.notation_cursor_radius = self.return_notation_idxs(self.menus)
+
+        self.notation_scroll_bar_idx_offset_current, self.notation_scroll_bar_idx_offset_previous = 0, 0
+        self.previous_board_states, self.previous_board_state_moves, self.previous_sound_states, self.current_board_state = np.zeros((2, self.max_move_count, 3, 8, 8), dtype=np.uint8), np.zeros((2, self.max_move_count, 2, 2), dtype=np.int16), np.zeros((2, self.max_move_count), dtype=np.uint0), None
+        self.previous_position_view_y_x_idxs = (None, None)
         self.notation_img_template = self.menus['notation']['img'].copy()
+        self.notation_cursor_current_xy = None
+        self.draw_notation_selection_circle(1, 0)
+
+        self.draw_notation_grid_onto_img(0)
+
         self.color_wheel, self.color_wheel_cursor_radius, self.current_color_cursor_location_yx = self.return_settings_menu(self.menu_bbox, self.menus)
         self.return_new_game_menu(self.menu_bbox, self.menus)
 
-        self.previous_board_states, self.previous_board_state_moves,  self.previous_sound_states, self.current_board_state = np.zeros((2, self.max_move_count, 3, 8, 8), dtype=np.uint8), np.zeros((2, self.max_move_count, 2, 2)), np.zeros((2, self.max_move_count), dtype=np.uint0), None
-        self.draw_notation_grid_onto_img(0)
         self.capture_states = np.zeros((2, 15), dtype=np.uint8)
         self.current_menu = None
         self.board_color_idxs, self.img_color_idxs_black, self.board_color_idxs_moves_black, self.board_color_idxs_moves_black = None, None, None, None
 
         self.buttons, self.buttons_names, self.button_ranges = self.return_menu_buttons()
         self.sound_is_on = True
-        self.current_game_state, self.current_menu = False, 'notation'
+        self.current_menu, self.previous_drawn_board_state = 'notation', False
         self.fen_notation = None
         self.mouse_xy = None
         self.fisher = False
@@ -113,20 +120,26 @@ class Img:
         max_notation = 'Qa1xe4++'
         max_total_text = max_turn_count_column_text + max_notation + max_notation
         text_buffer = .85
-        text_pixels_x = int((move_tracker_bbox[3] - move_tracker_bbox[2]) * text_buffer) - self.border_thickness * 3
+        text_pixels_x = int((((move_tracker_bbox[3] - move_tracker_bbox[2]) * text_buffer) - self.border_thickness * 2))
+        text_pixels_x_text = int((((move_tracker_bbox[3] - move_tracker_bbox[2]) * text_buffer) - self.border_thickness * 2)) * .9
+
         text_width = 0
-        while text_pixels_x >= text_width:
-            font_scale += .1
+        font_scale = .001
+        while text_pixels_x_text > text_width:
+            font_scale += .001
             text_width = cv2.getTextSize(max_total_text, self.font_face, font_scale, thickness)[0][0]
 
         self.font_scale_thickness = font_scale, thickness
 
         text_size = cv2.getTextSize(max_total_text, self.font_face, font_scale, thickness)
+        cursor_radius = text_size[0][1] + text_size[1]
         text_count = int((move_tracker_y // (text_size[0][1] + text_size[1])) * text_buffer)
         notation_text_size = cv2.getTextSize(max_notation, self.font_face, font_scale, thickness)
         turn_count_text_size = cv2.getTextSize(max_turn_count_column_text, self.font_face, font_scale, thickness)
         buffer_width = ((move_tracker_bbox[3] - move_tracker_bbox[2]) - (notation_text_size[0][0] * 2 + turn_count_text_size[0][0] + self.border_thickness * 2)) // 6
+        buffer_width = (buffer_width - ((text_pixels_x - text_pixels_x_text))//6).astype(np.int32)
         buffer_pixels = np.cumsum(np.hstack((0, np.full(5, buffer_width))))
+
 
         bbox_x = np.array([[0, turn_count_text_size[0][0]],
                            [turn_count_text_size[0][0], turn_count_text_size[0][0] + notation_text_size[0][0]],
@@ -154,22 +167,26 @@ class Img:
         move_tracker_bbox = np.array([self.board_img_bbox[0] + bbox_y_offset, self.board_img_bbox[0] + final_height + bbox_y_offset,
                                       self.board_img_bbox[3] + bbox_x_offset, self.board_img_bbox[3] + bbox_x_offset + final_width], dtype=np.int16)
         self.draw_border(self.img, move_tracker_bbox)
-        img_tracker = np.zeros((bbox_y[-1, 1] - bbox_y[0, 0], bbox_x[-1, 1], 3), dtype=np.uint8)
+        notation_img = np.zeros((bbox_y[-1, 1] - bbox_y[0, 0], bbox_x[-1, 1], 3), dtype=np.uint8)
 
         for x_idx in range(bbox_x.shape[0] - 1):
-            img_tracker[:, bbox_x[x_idx, 1]:bbox_x[x_idx + 1, 0]] = (255, 255, 255)
+            notation_img[:, bbox_x[x_idx, 1]:bbox_x[x_idx + 1, 0]] = (255, 255, 255)
         for y_idx in range(bbox_y.shape[0] - 1):
             bbox_mp_y = (bbox_y[y_idx, 1] + bbox_y[y_idx + 1, 0]) // 2
             start_y = bbox_mp_y - (self.border_thickness // 2)
-            img_tracker[start_y:start_y + self.border_thickness] = (255, 255, 255)
+            notation_img[start_y:start_y + self.border_thickness] = (255, 255, 255)
 
         for text, color, bbox in zip(('Move', 'White', 'Black'), (self.square_color_white, self.square_color_white, self.square_color_black), bbox_x):
             bbox_yx = np.hstack((bbox_y[0], bbox))
-            self.draw_centered_text(img_tracker, text, bbox_yx, color)
+            self.draw_centered_text(notation_img, text, bbox_yx, color)
+
+        # Draws current move circle on notation img
 
         move_tracker_bbox[0] += bbox_y[0, 1] - bbox_y[0, 1]
-        menu_dict['notation'] = {'funcs': (self.return_to_previous_game_state()), 'img': img_tracker}
-        return text_count, move_tracker_bbox, bbox_y, bbox_x, scroll_wheel_bbox
+        menu_dict['notation'] = {'funcs': (self.return_to_previous_game_state,), 'bboxs': np.array([[move_tracker_bbox[0] + bbox_y[1, 0], move_tracker_bbox[1], move_tracker_bbox[2] + bbox_x[1, 0], move_tracker_bbox[2] + bbox_x[2, 1]]], dtype=np.uint16), 'img': notation_img}
+        cx_cursors = int((bbox_x[1, 0] + cursor_radius // 2)), int((bbox_x[2, 0] + cursor_radius // 2))
+
+        return text_count, move_tracker_bbox, bbox_y, bbox_x, scroll_wheel_bbox, cx_cursors, cursor_radius // 4
 
     def return_img_arrays(self):
         img_order = ('king', 'queen', 'bishop', 'knight', 'rook', 'pawn')
@@ -375,7 +392,6 @@ class Img:
 
     def open_settings_menu(self):
         global turn_i_current_opponent
-        button_bbox = self.buttons['settings']['bbox']
         if self.current_menu == 'settings':
             self.finalize_accent_color()
             self.current_menu = 'notation'
@@ -383,23 +399,37 @@ class Img:
                 self.draw_notation_grid_onto_img(self.move_count)
             else:
                 self.draw_notation_grid_onto_img(self.move_count - 1)
-            self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
+            self.draw_back_button(undraw=True)
+
         elif self.current_menu == 'notation':
-            self.draw_menu(self.menus['settings']['img'])
-            self.board_color_idxs = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.square_color_black, axis=-1)) + (self.board_img_bbox[0], self.board_img_bbox[2])
-            self.board_color_idxs_moves_black = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.grid_square_templates[0, 1, 0, 0], axis=-1)) + (
-                self.board_img_bbox[0], self.board_img_bbox[2])
-            self.board_color_idxs_moves_white = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.grid_square_templates[1, 1, 0, 0], axis=-1)) + (
-                self.board_img_bbox[0], self.board_img_bbox[2])
-            self.current_menu = 'settings'
-            self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][1]
+            if self.previous_position_view_y_x_idxs[0] is None:
+                self.draw_menu(self.menus['settings']['img'])
+                self.board_color_idxs = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.square_color_black, axis=-1)) + (self.board_img_bbox[0], self.board_img_bbox[2])
+                self.board_color_idxs_moves_black = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.grid_square_templates[0, 1, 0, 0], axis=-1)) + (
+                    self.board_img_bbox[0], self.board_img_bbox[2])
+                self.board_color_idxs_moves_white = np.argwhere(np.all(self.img[self.board_img_bbox[0]:self.board_img_bbox[1], self.board_img_bbox[2]:self.board_img_bbox[3] + self.icon_buffer + self.icon_size_yx[1]] == self.grid_square_templates[1, 1, 0, 0], axis=-1)) + (
+                    self.board_img_bbox[0], self.board_img_bbox[2])
+                self.current_menu = 'settings'
+                self.draw_back_button()
+            else:
+                self.previous_position_view_y_x_idxs = None
+                self.return_to_current_game_state()
+                self.draw_back_button(undraw=True)
+
         elif self.current_menu == 'newgame':
             self.current_menu = 'notation'
-            self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
+            self.draw_back_button(undraw=True)
             if turn_i_current_opponent[0] == 1:
                 self.draw_notation_grid_onto_img(self.move_count)
             else:
                 self.draw_notation_grid_onto_img(self.move_count - 1)
+
+    def draw_back_button(self, undraw=False):
+        button_bbox = self.buttons['settings']['bbox']
+        if not undraw:
+            self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][1]
+        else:
+            self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
 
     def start_new_game(self):
         global new_game
@@ -506,11 +536,9 @@ class Img:
         button_bbox = self.buttons['settings']['bbox']
         self.img[button_bbox[0]:button_bbox[1], button_bbox[2]:button_bbox[3]] = self.buttons['settings']['img']['img'][0]
         x_idxs = self.notation_x_idxs[2]
-        for y_idx, text in zip(self.notation_y_idxs[1:1+len(self.notation_tracker[1])], self.notation_tracker[1]):
+        for y_idx, text in zip(self.notation_y_idxs[1:1 + len(self.notation_tracker[1])], self.notation_tracker[1]):
             # Draws the selected accent color onto the template
             self.draw_centered_text(self.menus['notation']['img'], text, np.hstack((y_idx, x_idxs)), text_color=self.square_color_black, fill_color=(0, 0, 0))
-
-
 
         relative_bbox = self.menus['newgame']['bboxs'][1] - (self.menu_bbox[0] - 1, self.menu_bbox[0] - 1, self.menu_bbox[2] + 1, self.menu_bbox[2])
         self.draw_centered_text(self.menus['newgame']['img'], 'Start Game', relative_bbox, (0, 0, 0), fill_color=self.square_color_black)
@@ -603,7 +631,7 @@ class Img:
         self.draw_board(draw_idxs, promotion_pos_array, pre_move=True)
         self.drawn_moves = draw_idxs
 
-    def draw_notation_text(self, current_i, yx_initial, yx_selected, piece, row_identifier=False, column_identifier=False, piece_captured=False, piece_promotion=None, castle_text=None, game_state_text=None):
+    def draw_notation_img(self, current_i, yx_initial, yx_selected, piece, row_identifier=False, column_identifier=False, piece_captured=False, piece_promotion=None, castle_text=None, game_state_text=None):
         if castle_text is None:
             if piece != Pieces.pawn:
                 text = f'{self.piece_abbreviations[piece.name]}'
@@ -630,17 +658,26 @@ class Img:
         if current_i == 0:
             color = self.square_color_white
             self.draw_centered_text(self.menus['notation']['img'], str(self.move_count), np.hstack((self.notation_y_idxs[self.move_count], self.notation_x_idxs[0])), color)
+            self.draw_notation_selection_circle(self.move_count, 1)
         else:
             color = self.square_color_black
+            self.draw_notation_selection_circle(self.move_count + 1, 0)
 
         self.draw_centered_text(self.menus['notation']['img'], text, np.hstack((self.notation_y_idxs[self.move_count], self.notation_x_idxs[current_i + 1])), color)
+        self.draw_notation_grid_onto_img(self.move_count, current_i)
         self.notation_tracker[current_i].append(text)
-        self.draw_notation_grid_onto_img(self.move_count)
 
         if current_i == 1:
             self.move_count += 1
 
-    def draw_notation_grid_onto_img(self, move_count=None):
+    def draw_notation_selection_circle(self, y_idx, x_idx):
+        if self.notation_cursor_current_xy is not None:
+            cv2.circle(self.menus['notation']['img'], self.notation_cursor_current_xy, self.notation_cursor_radius + 1, (0, 0, 0), -1, lineType=cv2.LINE_AA)
+
+        self.notation_cursor_current_xy = self.notation_cursor_x_idxs[x_idx], int(np.mean(self.notation_y_idxs[y_idx]))
+        cv2.circle(self.menus['notation']['img'], self.notation_cursor_current_xy, self.notation_cursor_radius, (255, 255 ,255), -1, lineType=cv2.LINE_AA)
+
+    def draw_notation_grid_onto_img(self, move_count=None, current_i=None):
         if move_count is None:
             move_count = self.move_count
         if self.draw_notation_titles:
@@ -652,15 +689,85 @@ class Img:
             self.draw_notation_titles = False
 
         self.img[self.menu_bbox[0]:self.menu_bbox[0] + self.notation_y_idxs[1, 0], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[0, 0]:self.notation_y_idxs[1, 0]]
-
-        if move_count <= self.notation_tracker_display_max_count:
+        if move_count < self.notation_tracker_display_max_count:
             start_i, end_i = 0, move_count
             img_range_y = self.notation_y_idxs[start_i + self.notation_tracker_display_max_count, 1] - self.notation_y_idxs[start_i, 0]
             self.img[self.menu_bbox[0]:self.menu_bbox[0] + img_range_y, self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[start_i + self.notation_tracker_display_max_count, 1]]
         else:
-            start_i = (move_count - self.notation_tracker_display_max_count) + 1
-            end_i = start_i + self.notation_tracker_display_max_count - 1
-            self.img[self.menu_bbox[0] + self.notation_y_idxs[1, 0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[end_i, 1]]
+            if current_i == 0:
+                start_i = (move_count - self.notation_tracker_display_max_count) + 1
+                end_i = (start_i + self.notation_tracker_display_max_count) - 1
+                self.img[self.menu_bbox[0] + self.notation_y_idxs[1, 0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[end_i, 1]]
+            else:
+                start_i = (move_count - self.notation_tracker_display_max_count) + 2
+                end_i = (start_i + self.notation_tracker_display_max_count) - 1
+                self.img[self.menu_bbox[0] + self.notation_y_idxs[1, 0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[end_i, 1]]
+
+    def return_to_previous_game_state(self):
+        global turn_i_current_opponent
+        if self.move_count > 1:
+            bbox, notation_y_step = self.menus['notation']['bboxs'][0], self.notation_y_idxs[2, 0] - self.notation_y_idxs[1, 0]
+
+            # If the notation is not completely filled, check that mouse_y is less than the max_notation_y. If not, return.
+            if self.move_count < self.notation_tracker_display_max_count:
+                bbox_max_y = bbox[0] + notation_y_step * (self.move_count - 1)
+                if self.mouse_xy[1] > bbox_max_y:
+                    return
+
+            notation_y_idx = (self.mouse_xy[1] - bbox[0]) // (self.notation_y_idxs[2, 0] - self.notation_y_idxs[1, 0])
+            notation_x_idx = 1 if self.mouse_xy[0] >= (bbox[2] + self.notation_x_idxs[1, 0]) else 0
+            if self.move_count > self.notation_tracker_display_max_count:
+                notation_y_idx += (self.move_count - (self.notation_tracker_display_max_count + self.notation_scroll_bar_idx_offset_current))
+            print(f'y:{notation_y_idx}')
+            print(f'x:{notation_x_idx}')
+
+            # Optimization below TODO
+            '''# If we are already viewing a previous board state
+            if self.previous_position_view_y_x_idxs[0] is not None:
+                # If the offset from scrolling has not changed
+                if self.notation_scroll_bar_idx_offset_previous == self.notation_scroll_bar_idx_offset_current:
+                    # If the previous idx matches clicked idx, no need to draw, return
+                    if notation_y_idx == self.notation_y_idxs[0] and notation_x_idx == self.previous_position_view_y_x_idxs[1]:
+                        return
+                # If Δoffset == Δidx,  same board state is being selected
+                elif notation_y_idx - self.previous_position_view_y_x_idxs[0] == self.notation_scroll_bar_idx_offset_current - self.notation_scroll_bar_idx_offset_previous:
+                    if self.notation_x_idxs[0] == self.previous_position_view_y_x_idxs[1]:
+                        return
+            # Otherwise, draw previous state'''
+
+            if turn_i_current_opponent[0] == 0:
+                self.current_board_state = self.previous_board_states[1, self.move_count - 2].copy()
+            else:
+                self.current_board_state = self.previous_board_states[0, self.move_count - 1].copy()
+
+            previous_board_state, previous_draw_values = self.previous_board_states[notation_x_idx, notation_y_idx], self.previous_board_state_moves[notation_x_idx, notation_y_idx]
+            all_draw_idxs = np.indices((8, 8))
+            self.draw_board(np.column_stack((all_draw_idxs[1].flatten(), all_draw_idxs[0].flatten())), previous_board_state)
+            self.draw_board(previous_draw_values, previous_board_state, pre_move=True)
+            self.previous_position_view_y_x_idxs = (notation_y_idx, notation_x_idx)
+            self.draw_back_button()
+
+            self.draw_notation_selection_circle(self.move_count, turn_i_current_opponent[0])
+            if self.move_count >= self.notation_tracker_display_max_count:
+                self.draw_notation_selection_circle(notation_y_idx - (self.move_count - (self.notation_scroll_bar_idx_offset_current - 1)), notation_x_idx)
+            else:
+                self.draw_notation_selection_circle(notation_y_idx + 1, notation_x_idx)
+            self.draw_notation_grid_onto_img()
+
+    def return_to_current_game_state(self):
+        all_draw_idxs = np.indices((8, 8))
+        self.draw_board(np.column_stack((all_draw_idxs[1].flatten(), all_draw_idxs[0].flatten())), self.current_board_state)
+        if self.drawn_previous_moves is not None:
+            self.draw_board(self.drawn_previous_moves, self.current_board_state, pre_move=True)
+        elif self.drawn_moves is not None:
+            self.draw_board(self.drawn_moves, self.current_board_state, pre_move=True)
+        self.draw_notation_selection_circle(self.move_count, turn_i_current_opponent[0])
+        self.draw_notation_grid_onto_img()
+
+        self.previous_position_view_y_x_idxs = None, None
+        self.current_board_state = None
+
+
 
     def draw_menu(self, img):
         self.img[self.menu_bbox[0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = img
@@ -707,12 +814,6 @@ class Img:
         if not uncheck:
             mp_xy = int((bbox[3] + bbox[2]) // 2), int((bbox[1] + bbox[0]) // 2)
             cv2.circle(img, mp_xy, self.checkbox_size_all_fill[1], (int(self.square_color_black[0]), int(self.square_color_black[1]), int(self.square_color_black[2])), -1, lineType=cv2.LINE_AA)
-
-    def return_to_previous_game_state(self):
-        pass
-
-    def return_to_current_game_state(self):
-        pass
 
     def click_is_on(self, location, mouse_x, mouse_y):
         click_bool = False
@@ -837,8 +938,6 @@ def main():
             non_pawn_row_values[remaining_squares[0::2]] = Pieces.rook.value + 1
             non_pawn_row_values[remaining_squares[1]] = Pieces.king.value + 1
 
-
-
         board_state_pieces_colors_squares[0:2, 0:] = 0
         for piece_color_i, pawn_row_i, non_pawn_row_i, in zip((white_i, black_i), (6, 1), (7, 0)):
             for row_i, row_values in zip((pawn_row_i, non_pawn_row_i), (Pieces.pawn.value + 1, non_pawn_row_values[0:])):
@@ -849,6 +948,7 @@ def main():
 
         y_empty_square_idxs = np.indices((8, 8))
         o_img.draw_board((np.column_stack((y_empty_square_idxs[0, 2:6].flatten(), y_empty_square_idxs[1, 2:6].flatten()))), board_state_pieces_colors_squares)
+        o_img.current_turn_i = 0
 
         for i in (white_i, black_i):
             update_king_obstruction_array(king_positions_yx[i], king_closest_obstructing_pieces_is[i])
@@ -1111,7 +1211,7 @@ def main():
             o_img.draw_board(np.vstack((valid_squares_yx, piece_yx_idx)), board_state_pieces_colors_squares, pre_move=True)
             o_img.piece_idx_selected = piece_yx_idx
             o_img.drawn_moves = np.vstack((valid_squares_yx, piece_yx_idx))
-            #o_img.draw_board(np.array([piece_yx_idx], dtype=np.uint16), board_state_pieces_colors_squares, pre_move=True)
+            # o_img.draw_board(np.array([piece_yx_idx], dtype=np.uint16), board_state_pieces_colors_squares, pre_move=True)
 
     def check_for_valid_moves(piece_id, selected_yx, checking_piece_yx, checking_piece_vector) -> (bool, bool):
         global turn_i_current_opponent
@@ -1211,7 +1311,7 @@ def main():
         piece_initial_yx, drawn_idxs = output_img_loc.piece_idx_selected, output_img_loc.drawn_moves
         drawn_idx_compare = np.all(drawn_idxs == piece_next_yx, axis=1)
         in_drawn_idxs = np.argwhere(drawn_idx_compare).flatten()
-        if in_drawn_idxs.shape[0] != 0 and np.any(piece_next_yx != piece_initial_yx, axis = -1):
+        if in_drawn_idxs.shape[0] != 0 and np.any(piece_next_yx != piece_initial_yx, axis=-1):
             draw_idxs = np.vstack((piece_initial_yx, piece_next_yx))
             piece_id = board_state_pieces_colors_squares[0, piece_initial_yx[0], piece_initial_yx[1]] - 1
             piece_draw, piece_promoted, captured_piece, castle_text, game_state_text = Pieces(piece_id), None, False, None, None
@@ -1327,25 +1427,6 @@ def main():
 
             o_img.draw_board_status(o_img.status_bar_current_text, text_color)
 
-
-            potential_ambiguous_moves = return_potential_moves(piece_next_yx, (piece_draw.value,), check_type='moves', )
-            if potential_ambiguous_moves is not None:
-                color_ids = board_state_pieces_colors_squares[0:2, potential_ambiguous_moves[:, 0], potential_ambiguous_moves[:, 1]]
-                same_piece_i = np.logical_and(color_ids[0] == piece_draw.value + 1, color_ids[1] == turn_i_current_opponent[0])
-                if np.any(same_piece_i):
-                    same_pieces = potential_ambiguous_moves[same_piece_i]
-                    if same_pieces.shape[0] == 1:
-                        if same_pieces[0, 0] == piece_initial_yx[0, 0]:
-                            o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
-                        else:
-                            o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
-                    else:
-                        o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
-                else:
-                    o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=game_state_text)
-            else:
-                o_img.draw_notation_text(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=castle_text)
-
             king_in_check_valid_piece_idxs[turn_i_current_opponent[1]] = None
             king_in_check_valid_moves[turn_i_current_opponent[1]].clear()
             output_img_loc.piece_idx_selected, output_img_loc.drawn_moves = None, None
@@ -1363,8 +1444,26 @@ def main():
                 o_img.draw_board(o_img.drawn_previous_moves, board_state_pieces_colors_squares)
             o_img.drawn_previous_moves = np.vstack((piece_next_yx, piece_initial_yx))
             o_img.draw_board(o_img.drawn_previous_moves, board_state_pieces_colors_squares, pre_move=True)
-            o_img.previous_board_states[turn_i_current_opponent[1], o_img.move_count - 1] = board_state_pieces_colors_squares
-            o_img.previous_board_state_moves[turn_i_current_opponent[1], o_img.move_count - 1] = o_img.drawn_previous_moves
+            o_img.previous_board_states[turn_i_current_opponent[1], o_img.move_count - 1] = board_state_pieces_colors_squares.copy()
+            o_img.previous_board_state_moves[turn_i_current_opponent[1], o_img.move_count - 1] = o_img.drawn_previous_moves.copy()
+
+            potential_ambiguous_moves = return_potential_moves(piece_next_yx, (piece_draw.value,), check_type='moves', )
+            if potential_ambiguous_moves is not None:
+                color_ids = board_state_pieces_colors_squares[0:2, potential_ambiguous_moves[:, 0], potential_ambiguous_moves[:, 1]]
+                same_piece_i = np.logical_and(color_ids[0] == piece_draw.value + 1, color_ids[1] == turn_i_current_opponent[0])
+                if np.any(same_piece_i):
+                    same_pieces = potential_ambiguous_moves[same_piece_i]
+                    if same_pieces.shape[0] == 1:
+                        if same_pieces[0, 0] == piece_initial_yx[0, 0]:
+                            o_img.draw_notation_img(turn_i, piece_initial_yx, piece_next_yx, piece_draw, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
+                        else:
+                            o_img.draw_notation_img(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
+                    else:
+                        o_img.draw_notation_img(turn_i, piece_initial_yx, piece_next_yx, piece_draw, column_identifier=True, row_identifier=True, piece_captured=captured_piece, castle_text=castle_text, piece_promotion=piece_promoted, game_state_text=game_state_text)
+                else:
+                    o_img.draw_notation_img(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=game_state_text)
+            else:
+                o_img.draw_notation_img(turn_i, piece_initial_yx, piece_next_yx, piece_draw, piece_captured=captured_piece, piece_promotion=piece_promoted, castle_text=castle_text, game_state_text=castle_text)
 
 
 
@@ -1434,15 +1533,13 @@ def main():
 
     cv2.namedWindow(o_img.window_name)
     cv2.setMouseCallback('Chess', mouse_handler)
-    running = True
-    while running:
+    while 1:
         cv2.imshow(o_img.window_name, o_img.img)
         if new_game:
             set_starting_board_state(fisher=o_img.fisher)
             new_game = False
         if cv2.waitKey(1) & 0xFF == ord('q'):
             cv2.destroyAllWindows()
-            running = False
             break
 
 
