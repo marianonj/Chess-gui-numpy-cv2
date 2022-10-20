@@ -1,5 +1,7 @@
 # It's chess in a day - one day to get the most functional 2p chess program up!
 # Lets go!
+import time
+
 import numpy as np
 from enum import Enum, auto
 import cv2, dir, personal_utils, os, vlc, keyboard
@@ -74,9 +76,12 @@ class OutputImg:
         self.previous_board_states, self.previous_board_state_moves, self.previous_sound_states, self.current_board_state = np.zeros((self.max_move_count * 2 + 1, 3, 8, 8), dtype=np.uint8), \
                                                                                                                             np.zeros((self.max_move_count * 2 + 1, 2, 2), dtype=np.int16), np.zeros(self.max_move_count * 2 + 1, dtype=np.uint0), None
         self.previous_position_view_idx = None
-        self.notation_img_template = self.menus['notation']['img'].copy()
         self.notation_cursor_current_xy = None
-        self.draw_notation_selection_circle(1, 0), self.draw_notation_grid_onto_img(0)
+        self.draw_notation_selection_circle(1, 0, img=self.menus['notation']['img'])
+        self.notation_img_template = self.menus['notation']['img'].copy()
+        self.draw_notation_grid_onto_img(0)
+
+
 
         self.color_wheel, self.color_wheel_cursor_radius, self.current_color_cursor_location_yx = self.return_settings_menu(self.menu_bbox, self.menus)
         self.return_new_game_menu(self.menu_bbox, self.menus)
@@ -94,6 +99,7 @@ class OutputImg:
         self.status_bar_strs = ('White', 'Black')
         self.status_bar_current_text = None
         self.back_button_drawn = False
+        self.previous_key_time, self.key_wait_time = time.perf_counter(), .01
 
     def return_piece_location_text_grid(self) -> np.ndarray:
         piece_locations = np.zeros((2, 8, 8), dtype=str)
@@ -673,12 +679,15 @@ class OutputImg:
         print(f'move count is {self.move_count}')
         self.notation_current_move_count = self.move_count
 
-    def draw_notation_selection_circle(self, y_idx, x_idx):
+    def draw_notation_selection_circle(self, y_idx, x_idx, img =None):
+        if img is None:
+            img = self.menus['notation']['img']
+
         if self.notation_cursor_current_xy is not None:
-            cv2.circle(self.menus['notation']['img'], self.notation_cursor_current_xy, self.notation_cursor_radius + 1, (0, 0, 0), -1, lineType=cv2.LINE_AA)
+            cv2.circle(img, self.notation_cursor_current_xy, self.notation_cursor_radius + 1, (0, 0, 0), -1, lineType=cv2.LINE_AA)
 
         self.notation_cursor_current_xy = self.notation_cursor_x_idxs[x_idx], int(np.mean(self.notation_y_idxs[y_idx]))
-        cv2.circle(self.menus['notation']['img'], self.notation_cursor_current_xy, self.notation_cursor_radius, (255, 255, 255), -1, lineType=cv2.LINE_AA)
+        cv2.circle(img, self.notation_cursor_current_xy, self.notation_cursor_radius, (255, 255, 255), -1, lineType=cv2.LINE_AA)
 
     def draw_notation_grid_onto_img(self, move_count=None):
         if move_count is None:
@@ -712,9 +721,9 @@ class OutputImg:
                 self.img[self.menu_bbox[0] + self.notation_y_idxs[1, 0]:self.menu_bbox[1], self.menu_bbox[2]:self.menu_bbox[3]] = self.menus['notation']['img'][self.notation_y_idxs[start_i, 0]: self.notation_y_idxs[end_i, 1]]
 
     def notation_keyboard_handler(self, key: keyboard.KeyboardEvent):
-        if self.current_menu == 'notation':
-            key_pressed = key.name
-            previous_state_idx = self.notation_current_move_count
+        #Slight delay to prevent double inputs
+        if self.current_menu == 'notation' and time.perf_counter() - self.previous_key_time >= self.key_wait_time:
+            self.previous_key_time, key_pressed, previous_state_idx = time.perf_counter(), key.name, self.notation_current_move_count
             if key_pressed == 'up':
                 previous_state_idx -= 2
             elif key_pressed == 'down':
@@ -1175,22 +1184,33 @@ def main():
                                     #Fisher castle handling
                                     if fisher_rook_xs is not None:
                                         if rook_x_i > piece_yx_idx[1]:
-                                            destination_squares_y_x, rook_x_idx = np.column_stack((np.repeat(piece_yx_idx[0], 2), (5, 6))), fisher_rook_xs[1]
+                                            destination_squares_yx, rook_x_idx = np.column_stack((np.repeat(piece_yx_idx[0], 2), (5, 6))), fisher_rook_xs[1]
                                             castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_i)
                                         else:
-                                            destination_squares_y_x, rook_x_idx = np.column_stack((np.repeat(piece_yx_idx[0], 2), (2, 3))), fisher_rook_xs[0]
+                                            destination_squares_yx, rook_x_idx = np.column_stack((np.repeat(piece_yx_idx[0], 2), (2, 3))), fisher_rook_xs[0]
                                             castle_x_idxs = np.arange(rook_x_i + 1, piece_yx_idx[1])
-                                        board_state = board_state_pieces_colors_squares[0:2, destination_squares_y_x[:, 0], destination_squares_y_x[:, 1]]
+
+                                        destination_square_is_protected = False
+                                        for destination_square in destination_squares_yx:
+                                            square_is_not_protected = return_potential_moves((destination_square, ), (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                                            if square_is_not_protected is not None:
+                                                destination_square_is_protected = True
+                                                break
+
+                                        if destination_square_is_protected:
+                                            continue
+
+                                        board_state = board_state_pieces_colors_squares[0:2, destination_squares_yx[:, 0], destination_squares_yx[:, 1]]
                                         occupied_squares = np.argwhere(board_state[0] > 0).flatten()
                                         #If squares are occupied, checks to see if the squares are occupied by the king/respective rook, if not, continue the loop
                                         if len(occupied_squares) != 0:
-                                            board_state, destination_squares = board_state[:, occupied_squares], destination_squares_y_x[occupied_squares]
+                                            board_state, destination_squares = board_state[:, occupied_squares], destination_squares_yx[occupied_squares]
                                             try:
                                                 if len(occupied_squares) == 1:
-                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_y_x[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
+                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_yx[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
                                                     valid_king = np.logical_and(board_state[0, 0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
                                                 else:
-                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_y_x[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
+                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_yx[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
                                                     valid_king = np.logical_and(board_state[0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
                                             except Exception:
                                                 print('b')
