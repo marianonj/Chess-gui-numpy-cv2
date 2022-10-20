@@ -9,7 +9,9 @@ Press q to exit the program at any time.
 Functionality Includes:
 
 Customizable colors (ignore gif artifacting on HSV wheel)
-![Colors](https://user-images.githubusercontent.com/83613942/196296064-1daec2c2-f015-41fe-a28a-bc54e366ae29.gif)
+![Colors](https://user-images.githubusercontent.com/83613942/196944999-d066eb55-72eb-40cb-bacc-9783e1ab6b10.gif)
+
+
 
 Notation Tracker (View previous moves using the arrow keys)
 ![Notation](https://user-images.githubusercontent.com/83613942/196295230-5b2dd916-a0db-4c61-b1ad-8a08a8c101d0.gif)
