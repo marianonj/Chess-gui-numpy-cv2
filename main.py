@@ -617,7 +617,6 @@ class OutputImg:
         img_gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
         text_color_idxs = np.column_stack(np.nonzero(img_gray))
         text_color_value_idxs = self.img[text_color_idxs[:, 0], text_color_idxs[:, 1]] / self.square_color_black
-        print('b')
         return text_color_idxs, text_color_value_idxs
 
     def draw_promotion_selector(self, idx_x, board_state, current_turn_i):
@@ -674,9 +673,7 @@ class OutputImg:
         self.draw_centered_text(self.menus['notation']['img'], text, np.hstack((self.notation_y_idxs[row_idx], self.notation_x_idxs[column_idx])), color)
         self.draw_notation_grid_onto_img(self.move_count)
         self.notation_tracker[turn_i].append(text)
-
         self.move_count += 1
-        print(f'move count is {self.move_count}')
         self.notation_current_move_count = self.move_count
 
     def draw_notation_selection_circle(self, y_idx, x_idx, img =None):
@@ -959,7 +956,6 @@ def main():
 
         for i in (white_i, black_i):
             update_king_obstruction_array(king_positions_yx[i], king_closest_obstructing_pieces_is[i])
-            print('b')
 
         # Clears move tracking arrays
         rook_king_rook_has_not_moved, en_passant_tracker = np.ones_like(rook_king_rook_has_not_moved), np.zeros_like(en_passant_tracker)
@@ -1205,22 +1201,16 @@ def main():
                                         #If squares are occupied, checks to see if the squares are occupied by the king/respective rook, if not, continue the loop
                                         if len(occupied_squares) != 0:
                                             board_state, destination_squares = board_state[:, occupied_squares], destination_squares_yx[occupied_squares]
-                                            try:
-                                                if len(occupied_squares) == 1:
-                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_yx[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
-                                                    valid_king = np.logical_and(board_state[0, 0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
-                                                else:
-                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_yx[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
-                                                    valid_king = np.logical_and(board_state[0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
-                                            except Exception:
-                                                print('b')
+                                            if len(occupied_squares) == 1:
+                                                valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_yx[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
+                                                valid_king = np.logical_and(board_state[0, 0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
+                                            else:
+                                                valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_yx[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
+                                                valid_king = np.logical_and(board_state[0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
 
 
                                             if np.count_nonzero(valid_rook) + np.count_nonzero(valid_king) != len(occupied_squares):
-                                                print('b')
                                                 continue
-                                            else:
-                                                print('b')
 
 
                                     elif rook_x_i > piece_yx_idx[1]:
@@ -1330,8 +1320,6 @@ def main():
                 for piece_id, piece_yx in zip(piece_ids, piece_moves):
                     potential_moves = return_potential_moves(piece_yx, (piece_id - 1,), obstruction_check=True)
                     if potential_moves is not None:
-                        if piece_id == Pieces.knight.value:
-                            print('b')
                         valid_moves_in_checking_idxs = (potential_moves[:, None] == checking_obstruction_squares).all(-1).any(-1)
                         if np.any(valid_moves_in_checking_idxs):
                             valid_moves = potential_moves[valid_moves_in_checking_idxs]
@@ -1616,7 +1604,6 @@ def main():
                 o_img.mouse_xy = x, y
                 if button_idx.shape[0] != 0:
                     o_img.buttons[o_img.buttons_names[int(button_idx)]]['func']()
-                    print('b')
 
     board_state_pieces_colors_squares = np.zeros((3, 8, 8), dtype=np.uint8)
     board_state_pieces_colors_squares[2] = return_white_squares_grid()
