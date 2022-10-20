@@ -10,9 +10,15 @@ Customizable colors (ignore gif artifacting on HSV wheel)
 
 
 Notation Tracker (View previous moves using the arrow keys)
-![Notation](https://user-images.githubusercontent.com/83613942/196295230-5b2dd916-a0db-4c61-b1ad-8a08a8c101d0.gif)
+![Notation](https://user![Fisher](https://user-images.githubusercontent.com/83613942/196939194-8c69fe3b-7478-4c7a-83cd-6bab4a9595a1.gif)
+-images.githubusercontent.com/83613942/196295230-5b2dd916-a0db-4c61-b1ad-8a08a8c101d0.gif)
 
 Notation Exporter (Exports to standard Portable Game Notation(PGN))
 ![Export](https://user-images.githubusercontent.com/83613942/196295312-1de6b345-6111-445e-a021-b33ec9802107.gif)
+
+Chess 960
+![Uploading Fisher.gif…]()
+
+
 
 
