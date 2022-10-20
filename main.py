@@ -909,8 +909,6 @@ def return_white_squares_grid():
     return chess_board_white_squares
 
 
-
-
 def main():
     global new_game
 
@@ -1162,47 +1160,95 @@ def main():
             piece_id = board_state_pieces_colors_squares[0, piece_yx_idx[0], piece_yx_idx[1]] - 1
             if board_state_pieces_colors_squares[1, piece_yx_idx[0], piece_yx_idx[1]] == turn_i_current_opponent[0] and piece_id != -1:
                 if piece_id == Pieces.king.value:
-                    single_moves = return_potential_moves(piece_yx_idx, (Pieces.king.value,))
-                    if single_moves is not None:
-                        valid_single_moves = np.ones(single_moves.shape[0], dtype=np.uint0)
-                        for i, single_move in enumerate(single_moves):
-                            square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
-                            if square_is_not_protected is not None:
-                                valid_single_moves[i] = 0
+                    # Castle Check
+                    if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
+                        if rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1]:
+                            # Fisher_rook_xs will be (2) array with the x values that they are located if a new game is started with o_img.fisher = True
+                            if fisher_rook_xs is not None:
+                                rook_x_idxs, offsets = fisher_rook_xs, fisher_rook_xs - king_positions_yx[turn_i_current_opponent[0], 1]
+                            else:
+                                rook_x_idxs, offsets = (0, 7), (-4, 3)
 
-                        if np.any(valid_single_moves != 0):
-                            valid_squares_yx = single_moves[np.argwhere(valid_single_moves).flatten()]
-                            # Castle Check
-                            if king_in_check_valid_piece_idxs[turn_i_current_opponent[0]] is None:
-                                if rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1]:
-                                    # Fisher_rook_xs will be (2) array with the x values that they are located if a new game is started with o_img.fisher = True
+                            for rook_has_moved_i, rook_x_i, king_x_offset in zip((0, 2), rook_x_idxs, offsets):
+                                if rook_king_rook_has_not_moved[turn_i_current_opponent[0], rook_has_moved_i]:
+                                    able_to_castle = True
+                                    #Fisher castle handling
                                     if fisher_rook_xs is not None:
-                                        rook_x_idxs, offsets = fisher_rook_xs, fisher_rook_xs - king_positions_yx[turn_i_current_opponent[0]]
-                                    else:
-                                        rook_x_idxs, offsets = (0, 7), (-4, 3)
+                                        if rook_x_i > piece_yx_idx[1]:
+                                            destination_squares_y_x, rook_x_idx = np.column_stack((np.repeat(piece_yx_idx[0], 2), (5, 6))), fisher_rook_xs[1]
+                                            castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_i)
+                                        else:
+                                            destination_squares_y_x, rook_x_idx = np.column_stack((np.repeat(piece_yx_idx[0], 2), (2, 3))), fisher_rook_xs[0]
+                                            castle_x_idxs = np.arange(rook_x_i + 1, piece_yx_idx[1])
+                                        board_state = board_state_pieces_colors_squares[0:2, destination_squares_y_x[:, 0], destination_squares_y_x[:, 1]]
+                                        occupied_squares = np.argwhere(board_state[0] > 0).flatten()
+                                        #If squares are occupied, checks to see if the squares are occupied by the king/respective rook, if not, continue the loop
+                                        if len(occupied_squares) != 0:
+                                            board_state, destination_squares = board_state[:, occupied_squares], destination_squares_y_x[occupied_squares]
+                                            try:
+                                                if len(occupied_squares) == 1:
+                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_y_x[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
+                                                    valid_king = np.logical_and(board_state[0, 0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
+                                                else:
+                                                    valid_rook = np.logical_and(np.logical_and(board_state[0] == Pieces.rook.value + 1, destination_squares_y_x[:, 1] == rook_x_idx), board_state[1] == turn_i_current_opponent[0])
+                                                    valid_king = np.logical_and(board_state[0] == Pieces.king.value + 1, board_state[1] == turn_i_current_opponent[0])
+                                            except Exception:
+                                                print('b')
 
-                                    for rook_has_moved_i, rook_x_i, king_x_offset in zip((0, 2), rook_x_idxs, offsets):
-                                        if rook_king_rook_has_not_moved[turn_i_current_opponent[0], rook_has_moved_i]:
-                                            if rook_x_i > piece_yx_idx[1]:
-                                                castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_i)
-                                                if fisher_rook_xs is not None:
-                                                    pass
 
+                                            if np.count_nonzero(valid_rook) + np.count_nonzero(valid_king) != len(occupied_squares):
+                                                print('b')
+                                                continue
                                             else:
-                                                castle_x_idxs = np.arange(rook_x_i + 1, piece_yx_idx[1])
-                                                if fisher_rook_xs is not None:
-                                                    pass
+                                                print('b')
 
-                                            castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
-                                            if np.all(board_state_pieces_colors_squares[0, castle_idxs_all[:, 0], castle_idxs_all[:, 1]] == 0):
-                                                able_to_castle = True
-                                                for castle_idx in castle_idxs_all:
-                                                    square_is_not_protected = return_potential_moves(castle_idx, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
-                                                    if square_is_not_protected is not None:
-                                                        able_to_castle = False
-                                                        break
-                                                if able_to_castle:
-                                                    valid_squares_yx = np.vstack((valid_squares_yx, np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)))
+
+                                    elif rook_x_i > piece_yx_idx[1]:
+                                        castle_x_idxs = np.arange(piece_yx_idx[1] + 1, rook_x_i)
+                                    else:
+                                        castle_x_idxs = np.arange(rook_x_i + 1, piece_yx_idx[1])
+
+
+                                    #Castle_x_idxs will always be nonzero for normal games, but fisher can create a scenario where the king and rook are adjacent but can still castle.
+                                    #In that instance, set able to castle to true, as the fisher check is done in the code block if fisher_rook_xs is not None:
+                                    if castle_x_idxs.shape[0] != 0:
+                                        castle_idxs_all = np.column_stack((np.full_like(castle_x_idxs, piece_yx_idx[0]), castle_x_idxs))
+                                        if np.all(board_state_pieces_colors_squares[0, castle_idxs_all[:, 0], castle_idxs_all[:, 1]] == 0):
+                                            for castle_idx in castle_idxs_all:
+                                                square_is_not_protected = return_potential_moves(castle_idx, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                                                if square_is_not_protected is not None:
+                                                    able_to_castle = False
+                                                    break
+                                        else:
+                                            able_to_castle = False
+                                    else:
+                                        able_to_castle = True
+
+                                    if able_to_castle:
+                                        if valid_squares_yx is not None:
+                                            valid_squares_yx = np.vstack((valid_squares_yx, np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)))
+                                        else:
+                                            valid_squares_yx = np.array([piece_yx_idx[0], piece_yx_idx[1] + king_x_offset], dtype=np.uint8)
+
+
+                                #Checks for Non Castle Moves
+                                single_moves = return_potential_moves(piece_yx_idx, (Pieces.king.value,))
+                                if single_moves is not None:
+                                    valid_single_moves = np.ones(single_moves.shape[0], dtype=np.uint0)
+                                    for i, single_move in enumerate(single_moves):
+                                        square_is_not_protected = return_potential_moves(single_move, (Pieces.queen.value, Pieces.knight.value), check_type='protection')
+                                        if square_is_not_protected is not None:
+                                            valid_single_moves[i] = 0
+                                    valid_non_castle_moves = single_moves[np.argwhere(valid_single_moves).flatten()]
+
+                                    if valid_non_castle_moves.shape[0] != 0:
+                                        if valid_squares_yx is not None:
+                                            valid_squares_yx = np.vstack((valid_squares_yx, valid_non_castle_moves))
+                                        else:
+                                            valid_squares_yx = valid_non_castle_moves
+
+
+
                 else:
                     valid_squares_yx = return_potential_moves(piece_yx_idx, (piece_id,), obstruction_check=True)
 
@@ -1354,33 +1400,18 @@ def main():
                     # Queenside
                     else:
                         castle_text = '0-0-0'
-                        rook_idx, king_idx = (piece_initial_yx[0], 2), (piece_initial_yx[0], 3)
+                        rook_idx, king_idx = (piece_initial_yx[0], 3), (piece_initial_yx[0], 2)
 
                     for piece_idxs in (piece_initial_yx, piece_next_yx):
                         board_state_pieces_colors_squares[0:2, piece_idxs[0], piece_idxs[1]] = (0, 0)
 
-                    for piece_i, piece_id in zip((rook_idx, king_idx), (Pieces.king.value + 1, Pieces.rook.value + 1)):
-                        board_state_pieces_colors_squares[0:2, piece_i[0], piece_i[1]] = (piece_id, turn_i)
+                    for piece_i, piece_id_loc in zip((rook_idx, king_idx), (Pieces.rook.value + 1, Pieces.king.value + 1)):
+                        board_state_pieces_colors_squares[0:2, piece_i[0], piece_i[1]] = (piece_id_loc, turn_i)
 
                     draw_idxs = np.vstack((piece_initial_yx, piece_next_yx, rook_idx, king_idx))
 
-                if piece_initial_yx[1] == 4:
-                    # Castle
-                    if abs(piece_next_yx[1] - piece_initial_yx[1]) == 2:
-                        if piece_next_yx[1] > piece_initial_yx[1]:
-                            board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_next_yx[1] - 1] = Pieces.rook.value + 1, turn_i_current_opponent[0]
-                            board_state_pieces_colors_squares[0:2, piece_initial_yx[0], 7] = 0, 0
-                            draw_idxs = np.vstack((draw_idxs, np.array([[piece_initial_yx[0], piece_next_yx[1] - 1],
-                                                                        [piece_initial_yx[0], 7]])))
-
-                        else:
-                            board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_next_yx[1] + 1] = Pieces.rook.value + 1, turn_i_current_opponent[0]
-                            board_state_pieces_colors_squares[0:2, piece_initial_yx[0], 0] = 0
-                            draw_idxs = np.vstack((draw_idxs, np.array([[piece_initial_yx[0], piece_next_yx[1] + 1],
-                                                                        [piece_initial_yx[0], 0]])))
-                            castle_text = '0-0'
-                rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1] = 0
-                king_positions_yx[turn_i_current_opponent[0]] = piece_next_yx
+                    rook_king_rook_has_not_moved[turn_i_current_opponent[0], 1] = 0
+                    king_positions_yx[turn_i_current_opponent[0]] = king_idx
 
             elif piece_id == Pieces.pawn.value:
                 if abs(piece_initial_yx[0] - piece_next_yx[0]) == 2:
@@ -1406,11 +1437,12 @@ def main():
             if board_state_pieces_colors_squares[0, piece_next_yx[0], piece_next_yx[1]] != 0:
                 captured_piece = True
 
-            board_state_pieces_colors_squares[0:2, piece_next_yx[0], piece_next_yx[1]] = board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]]
-            board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]] = (0, 0)
             potential_checking_piece_yx, potential_checking_piece_vector = None, None
-
             if piece_id != Pieces.king.value:
+                board_state_pieces_colors_squares[0:2, piece_next_yx[0], piece_next_yx[1]] = board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]]
+                board_state_pieces_colors_squares[0:2, piece_initial_yx[0], piece_initial_yx[1]] = (0, 0)
+
+
                 king_movement_vectors = movement_vectors[Pieces.king.value]
                 for i, (obstruction_array, king_yx) in enumerate(zip(king_closest_obstructing_pieces_is, king_positions_yx)):
                     if np.any(np.all(obstruction_array == piece_initial_yx, axis=1)):
