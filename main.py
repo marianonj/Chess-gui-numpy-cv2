@@ -99,7 +99,7 @@ class OutputImg:
         self.status_bar_strs = ('White', 'Black')
         self.status_bar_current_text = None
         self.back_button_drawn = False
-        self.previous_key_time, self.key_wait_time = time.perf_counter(), .01
+        self.previous_key_time, self.key_wait_time = time.perf_counter(), .025
 
     def return_piece_location_text_grid(self) -> np.ndarray:
         piece_locations = np.zeros((2, 8, 8), dtype=str)
@@ -720,7 +720,7 @@ class OutputImg:
     def notation_keyboard_handler(self, key: keyboard.KeyboardEvent):
         #Slight delay to prevent double inputs
         if self.current_menu == 'notation' and time.perf_counter() - self.previous_key_time >= self.key_wait_time:
-            self.previous_key_time, key_pressed, previous_state_idx = time.perf_counter(), key.name, self.notation_current_move_count
+            key_pressed, previous_state_idx = key.name, self.notation_current_move_count
             if key_pressed == 'up':
                 previous_state_idx -= 2
             elif key_pressed == 'down':
@@ -745,6 +745,7 @@ class OutputImg:
                         self.draw_board_status(self.status_bar_current_text, text_color=(255, 255, 255))
                     else:
                         self.draw_board_status(self.status_bar_current_text, text_color=self.square_color_black)
+            self.previous_key_time = time.perf_counter()
 
     def set_previous_game_state(self, previous_state_idx):
         self.current_board_state = self.previous_board_states[self.move_count, 0:].copy()
