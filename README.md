@@ -18,7 +18,7 @@ Notation Exporter (Exports to standard Portable Game Notation ([PGN](https://en.
 ![Export](https://user-images.githubusercontent.com/83613942/196295312-1de6b345-6111-445e-a021-b33ec9802107.gif)
 
 Chess 960
-![Fisher](https://user-images.githubusercontent.com/83613942/196940176-b580a627-0cf4-4463-8671-26a26a97c82e.gif)
+![Fisher](https://user-images.githubusercontent.com/83613942/196941954-0366080f-9ee1-4e47-9ece-3ba4dd141cba.gif)
 
 
 
