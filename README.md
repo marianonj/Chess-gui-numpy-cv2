@@ -1,10 +1,10 @@
 # Chess_GUI
-A 2-player chess gui made with Python-open-cv2 and NumPy. All chess logic written from scratch.
+A 2-player chess gui made with Python-open-cv2 and NumPy. All chess logic written from scratch
 ![Checkmate](https://user-images.githubusercontent.com/83613942/196294691-7954d2c8-f181-40bc-9c30-3c7a31afbd87.gif)
 
 To run:
-Install requirements.txt using pip install -r requirements.txt, then run main.py.
-Press q to exit the program at any time.
+Install requirements.txt using pip install -r requirements.txt, then run main.py
+Press q to exit the program at any time
 
 Functionality Includes:
 
